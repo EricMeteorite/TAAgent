@@ -547,6 +547,60 @@ def get_material_function_content(function_path: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
+def get_material_properties(material_name: str) -> Dict[str, Any]:
+    """
+    Get material properties including BlendMode, ShadingModel, TwoSided, MaterialDomain, etc.
+    
+    Args:
+        material_name: Name or path of the material
+    
+    Returns:
+        Dictionary with material properties:
+        - blend_mode: Opaque, Masked, Translucent, Additive, Modulate, AlphaComposite
+        - shading_models: List of enabled shading models
+        - two_sided: Whether material is two-sided
+        - material_domain: Surface, DeferredDecal, LightFunction, Volume, PostProcess, UserInterface
+        - is_masked: Whether material uses masking
+        - opacity_mask_clip_value: Clip value for masked materials
+    """
+    unreal = get_unreal_connection()
+    try:
+        response = unreal.send_command("get_material_properties", {"material_name": material_name})
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"get_material_properties error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
+def get_material_connections(material_name: str) -> Dict[str, Any]:
+    """
+    Get node connection relationships in a material.
+    
+    Args:
+        material_name: Name or path of the material
+    
+    Returns:
+        Dictionary with:
+        - node_connections: List of nodes and their input connections
+          - node_id: Unique identifier for the node
+          - inputs: Dict mapping input names to connected nodes
+            - connected_node: node_id of the source node
+            - output_index: Which output pin of the source node
+            - output_name: Name of the output pin
+        - property_connections: Dict mapping material properties to connected nodes
+          - BaseColor, Metallic, Specular, Roughness, Normal, etc.
+    """
+    unreal = get_unreal_connection()
+    try:
+        response = unreal.send_command("get_material_connections", {"material_name": material_name})
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"get_material_connections error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
 def get_available_materials(search_path: str = "/Game/") -> Dict[str, Any]:
     """
     Get a list of available materials in the project that can be applied to objects.

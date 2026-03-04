@@ -45,22 +45,26 @@ taskkill /F /IM UnrealEditor.exe
 taskkill /F /IM UnrealEditor-Win64-DebugGame.exe
 ```
 
-### 步骤 2: 生成项目文件（可选，首次或添加文件时需要）
+### 步骤 2: 生成项目文件（首次或添加文件时需要）
 ```bash
-# PowerShell 环境需要用 cmd /c 包装
-cmd /c "pushd E:\UE\UE_5.7\Engine\Build\BatchFiles && Build.bat -projectfiles -project=d:\CodeBuddy\rendering-mcp\ue-plugin\RenderingMCP\RenderingMCP.uproject -game -rocket -progress"
+cmd /c "pushd E:\UE\UE_5.7\Engine\Build\BatchFiles && Build.bat -projectfiles -project=d:\CodeBuddy\rendering-mcp\plugins\unreal\UnrealMCP\RenderingMCP\RenderingMCP.uproject -game -rocket -progress"
 ```
 
-### 步骤 3: 编译项目（推荐方式：启动 UE 自动编译）
-```bash
-# 推荐：直接启动 UE 编辑器，会自动编译插件
-start "" "E:\UE\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe" "d:\CodeBuddy\rendering-mcp\ue-plugin\RenderingMCP\RenderingMCP.uproject"
-```
+### 步骤 3: 编译项目（手动编译）
 
-> **注意**: 命令行编译 Build.bat 在 PowerShell 中可能失败（exit code 6），建议直接启动 UE 编辑器让引擎自动编译。
+**方式 A: 使用 Visual Studio**
+1. 打开 `d:\CodeBuddy\rendering-mcp\plugins\unreal\UnrealMCP\RenderingMCP\RenderingMCP.sln`
+2. 选择 `Development Editor` 配置
+3. 右键项目 → `Build`
+
+**方式 B: 启动 UE 编辑器自动编译**
+1. 双击 `.uproject` 文件
+2. UE 会自动检测并编译修改的插件
+
+> **注意**: 命令行 Build.bat 在 PowerShell 中可能失败（exit code 6），推荐使用 Visual Studio 或 UE 编辑器编译。
 
 ### 步骤 4: 验证编译成功
-UE 编辑器启动后会自动编译 C++ 插件，查看输出日志确认编译成功
+检查编译输出日志，确认无错误
 
 ---
 

@@ -36,7 +36,6 @@
 #include "Engine/StaticMesh.h"
 #include "StaticMeshAttributes.h"
 #include "MeshDescription.h"
-#include "MeshDescriptionBuilder.h"
 
 FEpicUnrealMCPEditorCommands::FEpicUnrealMCPEditorCommands()
 {
@@ -988,12 +987,12 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleCreateStaticMeshFrom
     Attributes.Register();
 
     // Get attribute references
-    TVertiveDataAttributesRef<FVector3f> VertexPositions = Attributes.GetVertexPositions();
-    TVertiveDataAttributesRef<FVector3f> VertexNormals = Attributes.GetVertexInstanceNormals();
-    TVertiveDataAttributesRef<FVector2f> VertexUVs = Attributes.GetVertexInstanceUVs();
-    TVertiveDataAttributesRef<FVector4f> VertexTangents = Attributes.GetVertexInstanceTangents();
-    TVertiveDataAttributesRef<FVector3f> VertexBinormalSigns = Attributes.GetVertexInstanceBinormalSigns();
-    TVertiveDataAttributesRef<FColor> VertexColors = Attributes.GetVertexInstanceColors();
+    TVertexAttributesRef<FVector3f> VertexPositions = Attributes.GetVertexPositions();
+    TVertexInstanceAttributesRef<FVector3f> VertexNormals = Attributes.GetVertexInstanceNormals();
+    TVertexInstanceAttributesRef<FVector2f> VertexUVs = Attributes.GetVertexInstanceUVs();
+    TVertexInstanceAttributesRef<FVector3f> VertexTangents = Attributes.GetVertexInstanceTangents();
+    TVertexInstanceAttributesRef<float> VertexBinormalSigns = Attributes.GetVertexInstanceBinormalSigns();
+    TVertexInstanceAttributesRef<FVector4f> VertexColors = Attributes.GetVertexInstanceColors();
 
     // Parse positions
     int32 NumVertices = PositionsArray->Num();
@@ -1178,31 +1177,44 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleCreateStaticMeshFrom
             {
                 FVector4f Tan = ParsedTangents[VertIdx];
                 VertexTangents[InstanceID] = FVector3f(Tan.X, Tan.Y, Tan.Z);
-                VertexBinormalSigns[InstanceID] = FVector3f(0.0f, Tan.W > 0 ? 1.0f : -1.0f, 0.0f);
+                VertexBinormalSigns[InstanceID] = Tan.W > 0 ? 1.0f : -1.0f;
             }
             else
             {
                 VertexTangents[InstanceID] = FVector3f(1.0f, 0.0f, 0.0f);
-                VertexBinormalSigns[InstanceID] = FVector3f(0.0f, 1.0f, 0.0f);
+                VertexBinormalSigns[InstanceID] = 1.0f;
             }
 
             // Color
             if (VertIdx < ParsedColors.Num())
             {
-                VertexColors[InstanceID] = ParsedColors[VertIdx];
+                VertexColors[InstanceID] = FVector4f(ParsedColors[VertIdx]);
             }
             else
             {
-                VertexColors[InstanceID] = FColor::White;
+                VertexColors[InstanceID] = FVector4f(1.0f, 1.0f, 1.0f, 1.0f);
             }
         }
 
+        // Create polygon group if needed
+        FPolygonGroupID PolygonGroupID;
+        if (MeshDescription->PolygonGroups().Num() == 0)
+        {
+            PolygonGroupID = MeshDescription->CreatePolygonGroup();
+        }
+        else
+        {
+            PolygonGroupID = MeshDescription->PolygonGroups().GetFirstValidID();
+        }
+
         // Create polygon
-        FPolygonID PolygonID = MeshDescription->CreatePolygon(MeshDescription->GetPolygonGroupIDs()[0], VertexInstanceIDs);
+        MeshDescription->CreatePolygon(PolygonGroupID, VertexInstanceIDs);
     }
 
     // Build static mesh
-    StaticMesh->BuildFromMeshDescription(*MeshDescription);
+    TArray<const FMeshDescription*> MeshDescriptions;
+    MeshDescriptions.Add(MeshDescription);
+    StaticMesh->BuildFromMeshDescriptions(MeshDescriptions);
 
     // Notify asset registry
     FAssetRegistryModule::AssetCreated(StaticMesh);

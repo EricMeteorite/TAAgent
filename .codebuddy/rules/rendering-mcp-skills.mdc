@@ -1,0 +1,76 @@
+---
+description: 
+alwaysApply: true
+enabled: true
+updatedAt: 2026-03-04T16:53:27.063Z
+provider: 
+---
+
+# Rendering MCP Skills
+
+This rule provides quick reference for all skills in the Rendering MCP project.
+
+## Available Skills
+
+### 1. Project Setup (`docs/skills/project-setup/`)
+- **Purpose**: Setup and maintenance guide for the Rendering MCP project
+- **Key Files**: `update-and-build.md`, `renderdoc-mcp-update.md`
+- **Quick Reference**:
+  - UE 编译：**不要自动启动 UE 编辑器**，让用户手动编译
+  - MCP 路径: `src/servers/unreal_render_mcp/` 和 `src/servers/renderdoc_mcp/`
+  - 配置文件: `config/mcp_config.example.json`
+
+### 2. RenderDoc FBX Export (`docs/skills/renderdoc-fbx-export/`)
+- **Purpose**: Export meshes from RenderDoc captures to FBX
+- **Key Files**: `workflow.md`, `ue-integration.md`
+- **Critical Rules**:
+  - POSITION/NORMAL/TANGENT 使用 `vs_input` (模型空间)，不用 `vs_output` (世界空间)
+  - UE→FBX 需要设置 `flip_winding_order=True` 解决法线反向问题
+  - GPU-Driven 渲染需要 `buffer_config` 参数
+
+### 3. UE Development (`docs/skills/ue-development/`)
+- **Purpose**: UE development workflows via MCP
+- **Key Files**: `tools-reference.md`, `blueprint-graph-guide.md`, `material-functions/`
+- **Tool Categories**:
+  - Materials: `create_material`, `add_material_expression`, `connect_material_nodes`, `compile_material`
+  - Textures: `import_texture`, `set_texture_properties`
+  - Meshes: `import_fbx`, `create_static_mesh_from_data`
+  - Niagara: `spawn_niagara_system`, `set_niagara_*_parameter`
+
+### 4. RenderDoc Material Reconstruction (`docs/skills/renderdoc-material-reconstruction/`)
+- **Purpose**: Reconstruct materials from RenderDoc captures
+- **Key Files**: `workflow.md`, `dxbc-analysis.md`, `texture-identification.md`
+
+### 5. Shadertoy Conversion (`docs/skills/shadertoy-conversion/`)
+- **Purpose**: Convert Shadertoy shaders to UE materials
+- **Key Files**: `guide.md`
+
+## Common Issues & Solutions
+
+| Issue | Skill | Solution |
+|-------|-------|----------|
+| UE 编译失败 | project-setup | 使用 Visual Studio 或手动启动 UE 编译 |
+| MCP 连接失败 | project-setup | 检查配置路径是否为 `src/servers/...` |
+| FBX 法线反向 | fbx-export | 设置 `flip_winding_order=True` |
+| FBX 比例错误 | fbx-export | 调整 `unit_scale` 参数 |
+| 光照问题 | fbx-export | 使用 `vs_input` 而非 `vs_output` |
+| 链接错误 | project-setup | 检查 Build.cs 是否添加了必要模块依赖 |
+
+## File Locations
+
+```
+d:\CodeBuddy\rendering-mcp\
+├── config/mcp_config.example.json    # MCP 配置
+├── src/servers/                       # MCP 服务器
+│   ├── renderdoc_mcp/
+│   └── unreal_render_mcp/
+├── plugins/unreal/UnrealMCP/         # UE 插件源码
+└── docs/skills/                       # Skill 文档
+```
+
+## UE5.7 API Notes
+
+- `TVertexInstanceAttributesRef` (不是 `TVertiveDataAttributesRef`)
+- `FPolygonGroupArray` 使用 `GetFirstValidID()` 而非 `[0]`
+- `BuildFromMeshDescriptions()` 需要数组参数
+- `EngineUtils.h` 包含 `TActorIterator`

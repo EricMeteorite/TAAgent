@@ -44,7 +44,8 @@ public class UnrealMCP : ModuleRules
 				"PhysicsCore",
 				"UnrealEd",           // For Blueprint editing
 				"BlueprintGraph",     // For K2Node classes (F15-F22)
-				"KismetCompiler"      // For Blueprint compilation (F15-F22)
+				"KismetCompiler",     // For Blueprint compilation (F15-F22)
+				"Niagara"             // For Niagara particle systems
 			}
 		);
 		
@@ -57,7 +58,10 @@ public class UnrealMCP : ModuleRules
 				"SlateCore",
 				"Kismet",
 				"Projects",
-				"AssetRegistry"
+				"AssetRegistry",
+				"MeshDescription",       // For FMeshDescription
+				"StaticMeshDescription", // For FStaticMeshAttributes
+				"Landscape"              // For UMaterialExpressionLandscapeLayerBlend
 			}
 		);
 		

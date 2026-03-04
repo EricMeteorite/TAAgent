@@ -65,6 +65,7 @@ UEpicUnrealMCPBridge::UEpicUnrealMCPBridge()
     EditorCommands = MakeShared<FEpicUnrealMCPEditorCommands>();
     BlueprintCommands = MakeShared<FEpicUnrealMCPBlueprintCommands>();
     BlueprintGraphCommands = MakeShared<FEpicUnrealMCPBlueprintGraphCommands>();
+    NiagaraCommands = MakeShared<FEpicUnrealMCPNiagaraCommands>();
 }
 
 UEpicUnrealMCPBridge::~UEpicUnrealMCPBridge()
@@ -72,6 +73,7 @@ UEpicUnrealMCPBridge::~UEpicUnrealMCPBridge()
     EditorCommands.Reset();
     BlueprintCommands.Reset();
     BlueprintGraphCommands.Reset();
+    NiagaraCommands.Reset();
 }
 
 // Initialize subsystem
@@ -256,6 +258,8 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                     CommandType == TEXT("create_material_function") ||
                     CommandType == TEXT("get_material_functions") ||
                     CommandType == TEXT("get_material_function_content") ||
+                    CommandType == TEXT("get_material_properties") ||
+                    CommandType == TEXT("get_material_connections") ||
                     CommandType == TEXT("import_texture") ||
                     CommandType == TEXT("set_static_mesh_asset_properties"))
             {
@@ -276,6 +280,24 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                      CommandType == TEXT("rename_function"))
             {
                 ResultJson = BlueprintGraphCommands->HandleCommand(CommandType, Params);
+            }
+            // Niagara Commands
+            else if (CommandType == TEXT("spawn_niagara_system") ||
+                     CommandType == TEXT("spawn_niagara_system_attached") ||
+                     CommandType == TEXT("get_niagara_systems") ||
+                     CommandType == TEXT("set_niagara_float_parameter") ||
+                     CommandType == TEXT("set_niagara_vector_parameter") ||
+                     CommandType == TEXT("set_niagara_color_parameter") ||
+                     CommandType == TEXT("set_niagara_bool_parameter") ||
+                     CommandType == TEXT("set_niagara_int_parameter") ||
+                     CommandType == TEXT("set_niagara_texture_parameter") ||
+                     CommandType == TEXT("get_niagara_parameters") ||
+                     CommandType == TEXT("activate_niagara_system") ||
+                     CommandType == TEXT("deactivate_niagara_system") ||
+                     CommandType == TEXT("destroy_niagara_system") ||
+                     CommandType == TEXT("get_niagara_assets"))
+            {
+                ResultJson = NiagaraCommands->HandleCommand(CommandType, Params);
             }
             else
             {

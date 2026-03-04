@@ -44,6 +44,12 @@ private:
     TSharedPtr<FJsonObject> HandleGetMaterialFunctions(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleGetMaterialFunctionContent(const TSharedPtr<FJsonObject>& Params);
     
+    // Material property reader
+    TSharedPtr<FJsonObject> HandleGetMaterialProperties(const TSharedPtr<FJsonObject>& Params);
+    
+    // Material connections reader
+    TSharedPtr<FJsonObject> HandleGetMaterialConnections(const TSharedPtr<FJsonObject>& Params);
+    
     // Texture import function
     TSharedPtr<FJsonObject> HandleImportTexture(const TSharedPtr<FJsonObject>& Params);
     

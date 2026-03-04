@@ -94,6 +94,10 @@
 #include "Materials/MaterialExpressionCurveAtlasRowParameter.h"
 #include "Materials/MaterialExpressionReroute.h"
 #include "Materials/MaterialExpressionComment.h"
+#include "Materials/MaterialExpressionMaterialFunctionCall.h"
+#include "Materials/MaterialExpressionLandscapeLayerBlend.h"
+#include "Materials/MaterialExpressionNormalize.h"
+#include "Materials/MaterialExpressionObjectOrientation.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Factories/MaterialFactoryNew.h"
 #include "Factories/TextureFactory.h"
@@ -208,6 +212,16 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleCommand(const FSt
     else if (CommandType == TEXT("get_material_function_content"))
     {
         return HandleGetMaterialFunctionContent(Params);
+    }
+    // Material property reader
+    else if (CommandType == TEXT("get_material_properties"))
+    {
+        return HandleGetMaterialProperties(Params);
+    }
+    // Material connections reader
+    else if (CommandType == TEXT("get_material_connections"))
+    {
+        return HandleGetMaterialConnections(Params);
     }
     // Texture import command
     else if (CommandType == TEXT("import_texture"))
@@ -3100,6 +3114,64 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetMaterialExpres
                 }
                 ExprObj->SetArrayField(TEXT("inputs"), InputNames);
             }
+            // MaterialFunctionCall - extract referenced function path
+            else if (UMaterialExpressionMaterialFunctionCall* FuncCall = Cast<UMaterialExpressionMaterialFunctionCall>(Expr))
+            {
+                if (FuncCall->MaterialFunction)
+                {
+                    ExprObj->SetStringField(TEXT("function_path"), FuncCall->MaterialFunction->GetPathName());
+                    ExprObj->SetStringField(TEXT("function_name"), FuncCall->MaterialFunction->GetName());
+                }
+                // Add function inputs info
+                TArray<TSharedPtr<FJsonValue>> FunctionInputs;
+                for (const FFunctionExpressionInput& FuncInput : FuncCall->FunctionInputs)
+                {
+                    TSharedPtr<FJsonObject> InputObj = MakeShared<FJsonObject>();
+                    // Use ExpressionInputId which is the GUID identifier
+                    InputObj->SetStringField(TEXT("input_id"), FuncInput.ExpressionInputId.ToString());
+                    if (FuncInput.ExpressionInput)
+                    {
+                        InputObj->SetStringField(TEXT("input_name"), FuncInput.ExpressionInput->InputName.ToString());
+                    }
+                    FunctionInputs.Add(MakeShared<FJsonValueObject>(InputObj));
+                }
+                ExprObj->SetArrayField(TEXT("function_inputs"), FunctionInputs);
+                // Add function outputs info
+                TArray<TSharedPtr<FJsonValue>> FunctionOutputs;
+                for (const FFunctionExpressionOutput& FuncOutput : FuncCall->FunctionOutputs)
+                {
+                    TSharedPtr<FJsonObject> OutputObj = MakeShared<FJsonObject>();
+                    // Use ExpressionOutputId which is the GUID identifier
+                    OutputObj->SetStringField(TEXT("output_id"), FuncOutput.ExpressionOutputId.ToString());
+                    if (FuncOutput.ExpressionOutput)
+                    {
+                        OutputObj->SetStringField(TEXT("output_name"), FuncOutput.ExpressionOutput->OutputName.ToString());
+                    }
+                    FunctionOutputs.Add(MakeShared<FJsonValueObject>(OutputObj));
+                }
+                ExprObj->SetArrayField(TEXT("function_outputs"), FunctionOutputs);
+            }
+            // TextureSample - extract texture info
+            else if (UMaterialExpressionTextureSample* TexSample = Cast<UMaterialExpressionTextureSample>(Expr))
+            {
+                if (TexSample->Texture)
+                {
+                    ExprObj->SetStringField(TEXT("texture_path"), TexSample->Texture->GetPathName());
+                    ExprObj->SetStringField(TEXT("texture_name"), TexSample->Texture->GetName());
+                }
+                // Sampler type
+                FString SamplerTypeStr;
+                switch (TexSample->SamplerType)
+                {
+                    case SAMPLERTYPE_Color: SamplerTypeStr = TEXT("Color"); break;
+                    case SAMPLERTYPE_LinearColor: SamplerTypeStr = TEXT("LinearColor"); break;
+                    case SAMPLERTYPE_Normal: SamplerTypeStr = TEXT("Normal"); break;
+                    case SAMPLERTYPE_Alpha: SamplerTypeStr = TEXT("Alpha"); break;
+                    case SAMPLERTYPE_Grayscale: SamplerTypeStr = TEXT("Grayscale"); break;
+                    default: SamplerTypeStr = TEXT("Color"); break;
+                }
+                ExprObj->SetStringField(TEXT("sampler_type"), SamplerTypeStr);
+            }
             
             ExpressionsArray.Add(MakeShared<FJsonValueObject>(ExprObj));
         }
@@ -3464,7 +3536,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetMaterialFuncti
     for (const FAssetData& AssetData : AssetDataList)
     {
         FString AssetName = AssetData.AssetName.ToString();
-        FString AssetPath = AssetData.ObjectPath.ToString();
+        FString AssetPath = AssetData.GetObjectPathString();
         
         // Apply name filter if specified
         if (!NameFilter.IsEmpty() && !AssetName.Contains(NameFilter))
@@ -3667,6 +3739,489 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetMaterialFuncti
     
     ResultObj->SetArrayField(TEXT("expressions"), ExpressionsArray);
     ResultObj->SetNumberField(TEXT("expression_count"), ExpressionsArray.Num());
+    ResultObj->SetBoolField(TEXT("success"), true);
+
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetMaterialProperties(const TSharedPtr<FJsonObject>& Params)
+{
+    // Get material name
+    FString MaterialName;
+    if (!Params->TryGetStringField(TEXT("material_name"), MaterialName))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'material_name' parameter"));
+    }
+
+    // Find or load the material
+    FString MaterialPath = MaterialName.StartsWith(TEXT("/")) ? MaterialName : FString::Printf(TEXT("/Game/Materials/%s"), *MaterialName);
+    UMaterial* Material = Cast<UMaterial>(UEditorAssetLibrary::LoadAsset(MaterialPath));
+    if (!Material)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material not found: %s"), *MaterialPath));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    
+    // Blend Mode
+    FString BlendModeStr;
+    switch (Material->BlendMode)
+    {
+        case BLEND_Opaque: BlendModeStr = TEXT("Opaque"); break;
+        case BLEND_Masked: BlendModeStr = TEXT("Masked"); break;
+        case BLEND_Translucent: BlendModeStr = TEXT("Translucent"); break;
+        case BLEND_Additive: BlendModeStr = TEXT("Additive"); break;
+        case BLEND_Modulate: BlendModeStr = TEXT("Modulate"); break;
+        case BLEND_AlphaComposite: BlendModeStr = TEXT("AlphaComposite"); break;
+        default: BlendModeStr = FString::Printf(TEXT("Unknown(%d)"), (int32)Material->BlendMode); break;
+    }
+    ResultObj->SetStringField(TEXT("blend_mode"), BlendModeStr);
+
+    // Shading Model - use GetShadingModels() for UE5.7 compatibility
+    FMaterialShadingModelField ShadingModels = Material->GetShadingModels();
+    TArray<FString> ShadingModelNames;
+    
+    if (ShadingModels.HasShadingModel(MSM_Unlit)) ShadingModelNames.Add(TEXT("Unlit"));
+    if (ShadingModels.HasShadingModel(MSM_DefaultLit)) ShadingModelNames.Add(TEXT("DefaultLit"));
+    if (ShadingModels.HasShadingModel(MSM_Subsurface)) ShadingModelNames.Add(TEXT("Subsurface"));
+    if (ShadingModels.HasShadingModel(MSM_PreintegratedSkin)) ShadingModelNames.Add(TEXT("PreintegratedSkin"));
+    if (ShadingModels.HasShadingModel(MSM_ClearCoat)) ShadingModelNames.Add(TEXT("ClearCoat"));
+    if (ShadingModels.HasShadingModel(MSM_SubsurfaceProfile)) ShadingModelNames.Add(TEXT("SubsurfaceProfile"));
+    if (ShadingModels.HasShadingModel(MSM_TwoSidedFoliage)) ShadingModelNames.Add(TEXT("TwoSidedFoliage"));
+    if (ShadingModels.HasShadingModel(MSM_Hair)) ShadingModelNames.Add(TEXT("Hair"));
+    if (ShadingModels.HasShadingModel(MSM_Cloth)) ShadingModelNames.Add(TEXT("Cloth"));
+    if (ShadingModels.HasShadingModel(MSM_Eye)) ShadingModelNames.Add(TEXT("Eye"));
+    if (ShadingModels.HasShadingModel(MSM_SingleLayerWater)) ShadingModelNames.Add(TEXT("SingleLayerWater"));
+    if (ShadingModels.HasShadingModel(MSM_ThinTranslucent)) ShadingModelNames.Add(TEXT("ThinTranslucent"));
+    if (ShadingModels.HasShadingModel(MSM_Strata)) ShadingModelNames.Add(TEXT("Strata"));
+    
+    if (ShadingModelNames.Num() == 0)
+    {
+        ShadingModelNames.Add(TEXT("DefaultLit"));
+    }
+    
+    TArray<TSharedPtr<FJsonValue>> ShadingModelsArray;
+    for (const FString& ModelName : ShadingModelNames)
+    {
+        ShadingModelsArray.Add(MakeShared<FJsonValueString>(ModelName));
+    }
+    ResultObj->SetArrayField(TEXT("shading_models"), ShadingModelsArray);
+    // Primary shading model for backward compatibility
+    ResultObj->SetStringField(TEXT("shading_model"), ShadingModelNames[0]);
+
+    // Two Sided
+    ResultObj->SetBoolField(TEXT("two_sided"), Material->TwoSided ? true : false);
+
+    // Material Domain
+    FString MaterialDomainStr;
+    switch (Material->MaterialDomain)
+    {
+        case MD_Surface: MaterialDomainStr = TEXT("Surface"); break;
+        case MD_DeferredDecal: MaterialDomainStr = TEXT("DeferredDecal"); break;
+        case MD_LightFunction: MaterialDomainStr = TEXT("LightFunction"); break;
+        case MD_Volume: MaterialDomainStr = TEXT("Volume"); break;
+        case MD_PostProcess: MaterialDomainStr = TEXT("PostProcess"); break;
+        case MD_UI: MaterialDomainStr = TEXT("UserInterface"); break;
+        default: MaterialDomainStr = TEXT("Surface"); break;
+    }
+    ResultObj->SetStringField(TEXT("material_domain"), MaterialDomainStr);
+
+    // Additional properties
+    ResultObj->SetBoolField(TEXT("is_masked"), Material->IsMasked());
+    ResultObj->SetBoolField(TEXT("is_blend_mode_masked"), Material->GetBlendMode() == BLEND_Masked);
+    
+    // Dithered LOD transition
+    ResultObj->SetBoolField(TEXT("dithered_lod_transition"), Material->DitheredLODTransition);
+    
+    // Dither opacity mask
+    ResultObj->SetBoolField(TEXT("dither_opacity_mask"), Material->DitherOpacityMask ? true : false);
+
+    // Output opacity mask
+    if (Material->IsMasked())
+    {
+        ResultObj->SetNumberField(TEXT("opacity_mask_clip_value"), Material->GetOpacityMaskClipValue());
+    }
+
+    // Cast ray traced shadow
+    ResultObj->SetBoolField(TEXT("cast_ray_traced_shadows"), Material->bCastRayTracedShadows);
+
+    ResultObj->SetStringField(TEXT("material_name"), Material->GetName());
+    ResultObj->SetStringField(TEXT("material_path"), Material->GetPathName());
+    ResultObj->SetBoolField(TEXT("success"), true);
+
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetMaterialConnections(const TSharedPtr<FJsonObject>& Params)
+{
+    // Get material name
+    FString MaterialName;
+    if (!Params->TryGetStringField(TEXT("material_name"), MaterialName))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'material_name' parameter"));
+    }
+
+    // Find or load the material
+    FString MaterialPath = MaterialName.StartsWith(TEXT("/")) ? MaterialName : FString::Printf(TEXT("/Game/Materials/%s"), *MaterialName);
+    UMaterial* Material = Cast<UMaterial>(UEditorAssetLibrary::LoadAsset(MaterialPath));
+    if (!Material)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material not found: %s"), *MaterialPath));
+    }
+
+    // Map from expression pointer to node_id
+    TMap<UMaterialExpression*, FString> ExprToNodeId;
+    const TArray<UMaterialExpression*>& Expressions = Material->GetExpressionCollection().Expressions;
+    
+    // Build the expression to node_id map
+    for (UMaterialExpression* Expr : Expressions)
+    {
+        if (Expr)
+        {
+            FString TypeName = Expr->GetClass()->GetName();
+            TypeName.ReplaceInline(TEXT("MaterialExpression"), TEXT(""));
+            FString NodeId = FString::Printf(TEXT("Expr_%s_%d"), *TypeName, Expr->GetUniqueID());
+            ExprToNodeId.Add(Expr, NodeId);
+        }
+    }
+
+    TArray<TSharedPtr<FJsonValue>> NodeConnectionsArray;
+    
+    // Iterate through all expressions and get their input connections
+    for (UMaterialExpression* Expr : Expressions)
+    {
+        if (!Expr) continue;
+        
+        FString NodeId = ExprToNodeId[Expr];
+        TSharedPtr<FJsonObject> NodeConnObj = MakeShared<FJsonObject>();
+        NodeConnObj->SetStringField(TEXT("node_id"), NodeId);
+        
+        TSharedPtr<FJsonObject> InputsObj = MakeShared<FJsonObject>();
+        
+        // Get inputs by iterating through GetInput
+        int32 InputIndex = 0;
+        FExpressionInput* Input = Expr->GetInput(InputIndex);
+        while (Input)
+        {
+            FString InputName = Expr->GetInputName(InputIndex).ToString();
+            TSharedPtr<FJsonObject> InputConnObj = MakeShared<FJsonObject>();
+            
+            if (Input->Expression)
+            {
+                FString* ConnectedNodeId = ExprToNodeId.Find(Input->Expression);
+                if (ConnectedNodeId)
+                {
+                    InputConnObj->SetStringField(TEXT("connected_node"), *ConnectedNodeId);
+                    InputConnObj->SetNumberField(TEXT("output_index"), Input->OutputIndex);
+                    
+                    // Output name if available
+                    FString OutputName;
+                    TArray<FExpressionOutput>& Outputs = Input->Expression->GetOutputs();
+                    if (Input->OutputIndex >= 0 && Input->OutputIndex < Outputs.Num())
+                    {
+                        OutputName = Outputs[Input->OutputIndex].OutputName.ToString();
+                        InputConnObj->SetStringField(TEXT("output_name"), OutputName);
+                    }
+                }
+            }
+            
+            if (InputConnObj->HasField(TEXT("connected_node")))
+            {
+                InputsObj->SetObjectField(InputName, InputConnObj);
+            }
+            
+            InputIndex++;
+            Input = Expr->GetInput(InputIndex);
+        }
+        
+        // Also handle specific expression types that have named inputs
+        // (fallback for GetInput not working for some types)
+        auto AddInputConnection = [&](const FString& InputName, FExpressionInput* ExprInput) {
+            if (ExprInput && ExprInput->Expression)
+            {
+                TSharedPtr<FJsonObject> InputConnObj = MakeShared<FJsonObject>();
+                FString* ConnectedNodeId = ExprToNodeId.Find(ExprInput->Expression);
+                if (ConnectedNodeId)
+                {
+                    InputConnObj->SetStringField(TEXT("connected_node"), *ConnectedNodeId);
+                    InputConnObj->SetNumberField(TEXT("output_index"), ExprInput->OutputIndex);
+                    
+                    FString OutputName;
+                    TArray<FExpressionOutput>& Outputs = ExprInput->Expression->GetOutputs();
+                    if (ExprInput->OutputIndex >= 0 && ExprInput->OutputIndex < Outputs.Num())
+                    {
+                        OutputName = Outputs[ExprInput->OutputIndex].OutputName.ToString();
+                        InputConnObj->SetStringField(TEXT("output_name"), OutputName);
+                    }
+                    InputsObj->SetObjectField(InputName, InputConnObj);
+                }
+            }
+        };
+        
+        // Handle specific types
+        if (UMaterialExpressionMultiply* Multiply = Cast<UMaterialExpressionMultiply>(Expr))
+        {
+            AddInputConnection(TEXT("A"), &Multiply->A);
+            AddInputConnection(TEXT("B"), &Multiply->B);
+        }
+        else if (UMaterialExpressionAdd* Add = Cast<UMaterialExpressionAdd>(Expr))
+        {
+            AddInputConnection(TEXT("A"), &Add->A);
+            AddInputConnection(TEXT("B"), &Add->B);
+        }
+        else if (UMaterialExpressionSubtract* Sub = Cast<UMaterialExpressionSubtract>(Expr))
+        {
+            AddInputConnection(TEXT("A"), &Sub->A);
+            AddInputConnection(TEXT("B"), &Sub->B);
+        }
+        else if (UMaterialExpressionDivide* Div = Cast<UMaterialExpressionDivide>(Expr))
+        {
+            AddInputConnection(TEXT("A"), &Div->A);
+            AddInputConnection(TEXT("B"), &Div->B);
+        }
+        else if (UMaterialExpressionLinearInterpolate* Lerp = Cast<UMaterialExpressionLinearInterpolate>(Expr))
+        {
+            AddInputConnection(TEXT("A"), &Lerp->A);
+            AddInputConnection(TEXT("B"), &Lerp->B);
+            AddInputConnection(TEXT("Alpha"), &Lerp->Alpha);
+        }
+        else if (UMaterialExpressionClamp* Clamp = Cast<UMaterialExpressionClamp>(Expr))
+        {
+            AddInputConnection(TEXT("Input"), &Clamp->Input);
+        }
+        else if (UMaterialExpressionPanner* Panner = Cast<UMaterialExpressionPanner>(Expr))
+        {
+            AddInputConnection(TEXT("Coordinate"), &Panner->Coordinate);
+            AddInputConnection(TEXT("Time"), &Panner->Time);
+        }
+        else if (UMaterialExpressionRotator* Rotator = Cast<UMaterialExpressionRotator>(Expr))
+        {
+            AddInputConnection(TEXT("Coordinate"), &Rotator->Coordinate);
+            AddInputConnection(TEXT("Time"), &Rotator->Time);
+        }
+        else if (UMaterialExpressionPower* Power = Cast<UMaterialExpressionPower>(Expr))
+        {
+            AddInputConnection(TEXT("Base"), &Power->Base);
+            AddInputConnection(TEXT("Exponent"), &Power->Exponent);
+        }
+        else if (UMaterialExpressionTextureSample* TexSample = Cast<UMaterialExpressionTextureSample>(Expr))
+        {
+            AddInputConnection(TEXT("Coordinates"), &TexSample->Coordinates);
+        }
+        else if (UMaterialExpressionTextureCoordinate* TexCoord = Cast<UMaterialExpressionTextureCoordinate>(Expr))
+        {
+            // TextureCoordinate has no inputs
+        }
+        else if (UMaterialExpressionComponentMask* Mask = Cast<UMaterialExpressionComponentMask>(Expr))
+        {
+            AddInputConnection(TEXT("Input"), &Mask->Input);
+        }
+        else if (UMaterialExpressionAbs* AbsExpr = Cast<UMaterialExpressionAbs>(Expr))
+        {
+            AddInputConnection(TEXT("Input"), &AbsExpr->Input);
+        }
+        else if (UMaterialExpressionOneMinus* OneMinus = Cast<UMaterialExpressionOneMinus>(Expr))
+        {
+            AddInputConnection(TEXT("Input"), &OneMinus->Input);
+        }
+        else if (UMaterialExpressionSaturate* Saturate = Cast<UMaterialExpressionSaturate>(Expr))
+        {
+            AddInputConnection(TEXT("Input"), &Saturate->Input);
+        }
+        else if (UMaterialExpressionCeil* Ceil = Cast<UMaterialExpressionCeil>(Expr))
+        {
+            AddInputConnection(TEXT("Input"), &Ceil->Input);
+        }
+        else if (UMaterialExpressionFloor* Floor = Cast<UMaterialExpressionFloor>(Expr))
+        {
+            AddInputConnection(TEXT("Input"), &Floor->Input);
+        }
+        else if (UMaterialExpressionFrac* Frac = Cast<UMaterialExpressionFrac>(Expr))
+        {
+            AddInputConnection(TEXT("Input"), &Frac->Input);
+        }
+        else if (UMaterialExpressionSine* Sine = Cast<UMaterialExpressionSine>(Expr))
+        {
+            AddInputConnection(TEXT("Input"), &Sine->Input);
+        }
+        else if (UMaterialExpressionCosine* Cosine = Cast<UMaterialExpressionCosine>(Expr))
+        {
+            AddInputConnection(TEXT("Input"), &Cosine->Input);
+        }
+        else if (UMaterialExpressionNormalize* Normalize = Cast<UMaterialExpressionNormalize>(Expr))
+        {
+            AddInputConnection(TEXT("Input"), &Normalize->VectorInput);
+        }
+        else if (UMaterialExpressionSquareRoot* Sqrt = Cast<UMaterialExpressionSquareRoot>(Expr))
+        {
+            AddInputConnection(TEXT("Input"), &Sqrt->Input);
+        }
+        else if (UMaterialExpressionMin* Min = Cast<UMaterialExpressionMin>(Expr))
+        {
+            AddInputConnection(TEXT("A"), &Min->A);
+            AddInputConnection(TEXT("B"), &Min->B);
+        }
+        else if (UMaterialExpressionMax* Max = Cast<UMaterialExpressionMax>(Expr))
+        {
+            AddInputConnection(TEXT("A"), &Max->A);
+            AddInputConnection(TEXT("B"), &Max->B);
+        }
+        else if (UMaterialExpressionRound* Round = Cast<UMaterialExpressionRound>(Expr))
+        {
+            AddInputConnection(TEXT("Input"), &Round->Input);
+        }
+        else if (UMaterialExpressionSign* Sign = Cast<UMaterialExpressionSign>(Expr))
+        {
+            AddInputConnection(TEXT("Input"), &Sign->Input);
+        }
+        else if (UMaterialExpressionFresnel* Fresnel = Cast<UMaterialExpressionFresnel>(Expr))
+        {
+            AddInputConnection(TEXT("Normal"), &Fresnel->Normal);
+        }
+        else if (UMaterialExpressionDepthFade* DepthFade = Cast<UMaterialExpressionDepthFade>(Expr))
+        {
+            AddInputConnection(TEXT("Opacity"), &DepthFade->InOpacity);
+            AddInputConnection(TEXT("FadeDistance"), &DepthFade->FadeDistance);
+        }
+        else if (UMaterialExpressionPixelDepth* PixelDepth = Cast<UMaterialExpressionPixelDepth>(Expr))
+        {
+            // No inputs
+        }
+        else if (UMaterialExpressionSceneDepth* SceneDepth = Cast<UMaterialExpressionSceneDepth>(Expr))
+        {
+            AddInputConnection(TEXT("Input"), &SceneDepth->Input);
+        }
+        else if (UMaterialExpressionWorldPosition* WorldPos = Cast<UMaterialExpressionWorldPosition>(Expr))
+        {
+            // No inputs
+        }
+        else if (UMaterialExpressionObjectPositionWS* ObjPos = Cast<UMaterialExpressionObjectPositionWS>(Expr))
+        {
+            // No inputs
+        }
+        else if (UMaterialExpressionCameraPositionWS* CamPos = Cast<UMaterialExpressionCameraPositionWS>(Expr))
+        {
+            // No inputs
+        }
+        else if (UMaterialExpressionCameraVectorWS* CamVec = Cast<UMaterialExpressionCameraVectorWS>(Expr))
+        {
+            // No inputs
+        }
+        else if (UMaterialExpressionReflectionVectorWS* ReflVec = Cast<UMaterialExpressionReflectionVectorWS>(Expr))
+        {
+            // No inputs
+        }
+        else if (UMaterialExpressionLightVector* LightVec = Cast<UMaterialExpressionLightVector>(Expr))
+        {
+            // No inputs
+        }
+        else if (UMaterialExpressionDistance* Dist = Cast<UMaterialExpressionDistance>(Expr))
+        {
+            AddInputConnection(TEXT("A"), &Dist->A);
+            AddInputConnection(TEXT("B"), &Dist->B);
+        }
+        else if (UMaterialExpressionDesaturation* Desat = Cast<UMaterialExpressionDesaturation>(Expr))
+        {
+            AddInputConnection(TEXT("Input"), &Desat->Input);
+            AddInputConnection(TEXT("Fraction"), &Desat->Fraction);
+        }
+        else if (UMaterialExpressionLandscapeLayerBlend* LayerBlend = Cast<UMaterialExpressionLandscapeLayerBlend>(Expr))
+        {
+            // Handle LayerBlend layers - use LayerInput member
+            for (int32 LayerIdx = 0; LayerIdx < LayerBlend->Layers.Num(); LayerIdx++)
+            {
+                FString LayerInputName = FString::Printf(TEXT("Layer_%d"), LayerIdx);
+                AddInputConnection(LayerInputName, &LayerBlend->Layers[LayerIdx].LayerInput);
+            }
+        }
+        else if (UMaterialExpressionStaticBoolParameter* StaticBool = Cast<UMaterialExpressionStaticBoolParameter>(Expr))
+        {
+            // Has no inputs typically
+        }
+        else if (UMaterialExpressionStaticSwitch* StaticSwitch = Cast<UMaterialExpressionStaticSwitch>(Expr))
+        {
+            AddInputConnection(TEXT("A"), &StaticSwitch->A);
+            AddInputConnection(TEXT("B"), &StaticSwitch->B);
+        }
+        else if (UMaterialExpressionIf* IfExpr = Cast<UMaterialExpressionIf>(Expr))
+        {
+            AddInputConnection(TEXT("A"), &IfExpr->A);
+            AddInputConnection(TEXT("B"), &IfExpr->B);
+            AddInputConnection(TEXT("AGreaterThanB"), &IfExpr->AGreaterThanB);
+            AddInputConnection(TEXT("AEqualsB"), &IfExpr->AEqualsB);
+            AddInputConnection(TEXT("ALessThanB"), &IfExpr->ALessThanB);
+        }
+        else if (UMaterialExpressionMaterialFunctionCall* FuncCall = Cast<UMaterialExpressionMaterialFunctionCall>(Expr))
+        {
+            for (int32 FuncInputIdx = 0; FuncInputIdx < FuncCall->FunctionInputs.Num(); FuncInputIdx++)
+            {
+                FString InputName;
+                if (FuncCall->FunctionInputs[FuncInputIdx].ExpressionInput)
+                {
+                    InputName = FuncCall->FunctionInputs[FuncInputIdx].ExpressionInput->InputName.ToString();
+                }
+                else
+                {
+                    InputName = FString::Printf(TEXT("Input_%d"), FuncInputIdx);
+                }
+                AddInputConnection(InputName, &FuncCall->FunctionInputs[FuncInputIdx].Input);
+            }
+        }
+        
+        if (InputsObj->Values.Num() > 0)
+        {
+            NodeConnObj->SetObjectField(TEXT("inputs"), InputsObj);
+        }
+        
+        NodeConnectionsArray.Add(MakeShared<FJsonValueObject>(NodeConnObj));
+    }
+
+    // Get property connections
+    TSharedPtr<FJsonObject> PropertyConnectionsObj = MakeShared<FJsonObject>();
+    
+    auto AddPropertyConnection = [&](const FString& PropertyName, EMaterialProperty MaterialProperty) {
+        FExpressionInput* PropertyInput = Material->GetExpressionInputForProperty(MaterialProperty);
+        if (PropertyInput && PropertyInput->Expression)
+        {
+            TSharedPtr<FJsonObject> PropConnObj = MakeShared<FJsonObject>();
+            FString* ConnectedNodeId = ExprToNodeId.Find(PropertyInput->Expression);
+            if (ConnectedNodeId)
+            {
+                PropConnObj->SetStringField(TEXT("node_id"), *ConnectedNodeId);
+                PropConnObj->SetNumberField(TEXT("output_index"), PropertyInput->OutputIndex);
+                
+                FString OutputName;
+                TArray<FExpressionOutput>& Outputs = PropertyInput->Expression->GetOutputs();
+                if (PropertyInput->OutputIndex >= 0 && PropertyInput->OutputIndex < Outputs.Num())
+                {
+                    OutputName = Outputs[PropertyInput->OutputIndex].OutputName.ToString();
+                    PropConnObj->SetStringField(TEXT("output_name"), OutputName);
+                }
+                PropertyConnectionsObj->SetObjectField(PropertyName, PropConnObj);
+            }
+        }
+    };
+
+    AddPropertyConnection(TEXT("BaseColor"), MP_BaseColor);
+    AddPropertyConnection(TEXT("Metallic"), MP_Metallic);
+    AddPropertyConnection(TEXT("Specular"), MP_Specular);
+    AddPropertyConnection(TEXT("Roughness"), MP_Roughness);
+    AddPropertyConnection(TEXT("Normal"), MP_Normal);
+    AddPropertyConnection(TEXT("WorldPositionOffset"), MP_WorldPositionOffset);
+    AddPropertyConnection(TEXT("EmissiveColor"), MP_EmissiveColor);
+    AddPropertyConnection(TEXT("Opacity"), MP_Opacity);
+    AddPropertyConnection(TEXT("OpacityMask"), MP_OpacityMask);
+    AddPropertyConnection(TEXT("AmbientOcclusion"), MP_AmbientOcclusion);
+    AddPropertyConnection(TEXT("Refraction"), MP_Refraction);
+    AddPropertyConnection(TEXT("PixelDepthOffset"), MP_PixelDepthOffset);
+    AddPropertyConnection(TEXT("SubsurfaceColor"), MP_SubsurfaceColor);
+    // MP_TangentColor not available in UE5.7
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetArrayField(TEXT("node_connections"), NodeConnectionsArray);
+    ResultObj->SetObjectField(TEXT("property_connections"), PropertyConnectionsObj);
+    ResultObj->SetNumberField(TEXT("node_count"), Expressions.Num());
+    ResultObj->SetStringField(TEXT("material_name"), Material->GetName());
     ResultObj->SetBoolField(TEXT("success"), true);
 
     return ResultObj;
