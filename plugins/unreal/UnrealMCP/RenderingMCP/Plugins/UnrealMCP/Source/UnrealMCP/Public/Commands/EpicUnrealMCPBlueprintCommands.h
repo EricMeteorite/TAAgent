@@ -37,6 +37,9 @@ private:
     TSharedPtr<FJsonObject> HandleConnectMaterialNodes(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleSetMaterialProperties(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleCompileMaterial(const TSharedPtr<FJsonObject>& Params);
+    
+    // Batch material graph builder (replaces multiple add+connect calls)
+    TSharedPtr<FJsonObject> HandleBuildMaterialGraph(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleGetMaterialExpressions(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObject>& Params);
     

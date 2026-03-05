@@ -78,14 +78,43 @@ batch_set_actors_properties([
 ])
 ```
 
-## Material Graph Tools (4 tools)
+## Material Graph Tools (Recommended)
 
-| Tool | Purpose |
-|------|---------|
-| `add_material_expression(material, type, pos_x, pos_y, ...)` | Add node |
-| `connect_material_nodes(material, source, target, ...)` | Connect nodes |
-| `get_material_expressions(material)` | List nodes |
-| `get_material_connections(material)` | Get connections |
+### `build_material_graph` (Batch Operation)
+
+Build an entire material graph in a single call. Replaces multiple `add_material_expression` + `connect_material_nodes` calls.
+
+```python
+build_material_graph(
+    material_name="M_MyMaterial",
+    nodes=[
+        {"id": "color", "type": "Constant3Vector", "pos_x": -300, "pos_y": 0, 
+         "value": [1.0, 0.0, 0.0]},
+        {"id": "roughness", "type": "Constant", "pos_x": -300, "pos_y": 200, 
+         "value": 0.5},
+        {"id": "tex_base", "type": "TextureSample", "pos_x": -500, "pos_y": 0,
+         "texture": "/Game/Textures/T_BaseColor"}
+    ],
+    connections=[
+        {"source": "tex_base", "target": "Material", "target_input": "BaseColor"},
+        {"source": "color", "target": "Material", "target_input": "EmissiveColor"},
+        {"source": "roughness", "target": "Material", "target_input": "Roughness"}
+    ],
+    properties={"shading_model": "DefaultLit", "blend_mode": "Opaque"},
+    compile=True
+)
+```
+
+**Supported Node Types:** Constant, Constant2/3/4Vector, ScalarParameter, VectorParameter, TextureSample, Multiply, Add, Subtract, Divide, Lerp, Clamp, TextureCoordinate, Time, VertexNormal, WorldPosition, OneMinus, Saturate, Normalize, DotProduct, CrossProduct, ComponentMask, AppendVector, Fresnel, Power, Panner, Rotator, Sine, Cosine, Abs, Floor, Ceil, Frac, SquareRoot, Desaturation, ReflectionVector, CameraPosition, CameraVector
+
+### Legacy Tools (Deprecated)
+
+| Tool | Purpose | Status |
+|------|---------|--------|
+| `add_material_expression(...)` | Add single node | ⚠️ Use `build_material_graph` |
+| `connect_material_nodes(...)` | Connect nodes | ⚠️ Use `build_material_graph` |
+| `get_material_expressions(material)` | List nodes | ✅ Active |
+| `get_material_connections(material)` | Get connections | ✅ Active |
 
 ## Other Tools
 

@@ -189,6 +189,10 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleCommand(const FSt
     {
         return HandleConnectMaterialNodes(Params);
     }
+    else if (CommandType == TEXT("build_material_graph"))
+    {
+        return HandleBuildMaterialGraph(Params);
+    }
     else if (CommandType == TEXT("set_material_properties"))
     {
         return HandleSetMaterialProperties(Params);
@@ -4474,6 +4478,466 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetMaterialConnec
     ResultObj->SetObjectField(TEXT("property_connections"), PropertyConnectionsObj);
     ResultObj->SetNumberField(TEXT("node_count"), Expressions.Num());
     ResultObj->SetStringField(TEXT("material_name"), Material->GetName());
+    ResultObj->SetBoolField(TEXT("success"), true);
+
+    return ResultObj;
+}
+
+// ============================================================================
+// Batch Material Graph Builder
+// ============================================================================
+TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleBuildMaterialGraph(const TSharedPtr<FJsonObject>& Params)
+{
+    // Get material name
+    FString MaterialName;
+    if (!Params->TryGetStringField(TEXT("material_name"), MaterialName))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'material_name' parameter"));
+    }
+
+    // Find or load the material
+    FString MaterialPath = MaterialName.StartsWith(TEXT("/")) ? MaterialName : FString::Printf(TEXT("/Game/Materials/%s"), *MaterialName);
+    UMaterial* Material = Cast<UMaterial>(UEditorAssetLibrary::LoadAsset(MaterialPath));
+    if (!Material)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material not found: %s"), *MaterialPath));
+    }
+
+    // Track created nodes for connection mapping
+    TMap<FString, UMaterialExpression*> NodeIdToExpression;
+    TArray<TSharedPtr<FJsonValue>> CreatedNodesArray;
+    int32 NodeCount = 0;
+    int32 ConnectionCount = 0;
+
+    // Process nodes array
+    const TArray<TSharedPtr<FJsonValue>>* NodesArray = nullptr;
+    if (Params->TryGetArrayField(TEXT("nodes"), NodesArray) && NodesArray)
+    {
+        for (const TSharedPtr<FJsonValue>& NodeValue : *NodesArray)
+        {
+            if (!NodeValue.IsValid()) continue;
+            
+            TSharedPtr<FJsonObject> NodeObj = NodeValue->AsObject();
+            if (!NodeObj.IsValid()) continue;
+
+            // Get node ID
+            FString NodeId;
+            if (!NodeObj->TryGetStringField(TEXT("id"), NodeId))
+            {
+                continue; // Skip nodes without ID
+            }
+
+            // Get expression type
+            FString ExpressionType;
+            if (!NodeObj->TryGetStringField(TEXT("type"), ExpressionType))
+            {
+                continue;
+            }
+
+            // Get position
+            int32 PosX = 0, PosY = 0;
+            NodeObj->TryGetNumberField(TEXT("pos_x"), PosX);
+            NodeObj->TryGetNumberField(TEXT("pos_y"), PosY);
+
+            // Create expression based on type
+            UMaterialExpression* NewExpression = nullptr;
+
+            if (ExpressionType == TEXT("Constant"))
+            {
+                UMaterialExpressionConstant* Const = NewObject<UMaterialExpressionConstant>(Material);
+                float Value = 0.0f;
+                NodeObj->TryGetNumberField(TEXT("value"), Value);
+                Const->R = Value;
+                NewExpression = Const;
+            }
+            else if (ExpressionType == TEXT("Constant2Vector"))
+            {
+                UMaterialExpressionConstant2Vector* Const2 = NewObject<UMaterialExpressionConstant2Vector>(Material);
+                const TArray<TSharedPtr<FJsonValue>>* ValueArray = nullptr;
+                if (NodeObj->TryGetArrayField(TEXT("value"), ValueArray) && ValueArray && ValueArray->Num() >= 2)
+                {
+                    Const2->R = (*ValueArray)[0]->AsNumber();
+                    Const2->G = (*ValueArray)[1]->AsNumber();
+                }
+                NewExpression = Const2;
+            }
+            else if (ExpressionType == TEXT("Constant3Vector"))
+            {
+                UMaterialExpressionConstant3Vector* Const3 = NewObject<UMaterialExpressionConstant3Vector>(Material);
+                const TArray<TSharedPtr<FJsonValue>>* ValueArray = nullptr;
+                if (NodeObj->TryGetArrayField(TEXT("value"), ValueArray) && ValueArray && ValueArray->Num() >= 3)
+                {
+                    Const3->Constant.R = (*ValueArray)[0]->AsNumber();
+                    Const3->Constant.G = (*ValueArray)[1]->AsNumber();
+                    Const3->Constant.B = (*ValueArray)[2]->AsNumber();
+                }
+                NewExpression = Const3;
+            }
+            else if (ExpressionType == TEXT("Constant4Vector"))
+            {
+                UMaterialExpressionConstant4Vector* Const4 = NewObject<UMaterialExpressionConstant4Vector>(Material);
+                const TArray<TSharedPtr<FJsonValue>>* ValueArray = nullptr;
+                if (NodeObj->TryGetArrayField(TEXT("value"), ValueArray) && ValueArray && ValueArray->Num() >= 4)
+                {
+                    Const4->Constant.R = (*ValueArray)[0]->AsNumber();
+                    Const4->Constant.G = (*ValueArray)[1]->AsNumber();
+                    Const4->Constant.B = (*ValueArray)[2]->AsNumber();
+                    Const4->Constant.A = (*ValueArray)[3]->AsNumber();
+                }
+                NewExpression = Const4;
+            }
+            else if (ExpressionType == TEXT("Multiply"))
+            {
+                NewExpression = NewObject<UMaterialExpressionMultiply>(Material);
+            }
+            else if (ExpressionType == TEXT("Add"))
+            {
+                NewExpression = NewObject<UMaterialExpressionAdd>(Material);
+            }
+            else if (ExpressionType == TEXT("Subtract"))
+            {
+                NewExpression = NewObject<UMaterialExpressionSubtract>(Material);
+            }
+            else if (ExpressionType == TEXT("Divide"))
+            {
+                NewExpression = NewObject<UMaterialExpressionDivide>(Material);
+            }
+            else if (ExpressionType == TEXT("Lerp"))
+            {
+                NewExpression = NewObject<UMaterialExpressionLinearInterpolate>(Material);
+            }
+            else if (ExpressionType == TEXT("Clamp"))
+            {
+                NewExpression = NewObject<UMaterialExpressionClamp>(Material);
+            }
+            else if (ExpressionType == TEXT("TextureSample"))
+            {
+                UMaterialExpressionTextureSample* TexExpr = NewObject<UMaterialExpressionTextureSample>(Material);
+                FString TexturePath;
+                if (NodeObj->TryGetStringField(TEXT("texture"), TexturePath))
+                {
+                    UTexture* Texture = Cast<UTexture>(UEditorAssetLibrary::LoadAsset(TexturePath));
+                    if (Texture)
+                    {
+                        TexExpr->Texture = Texture;
+                    }
+                }
+                NewExpression = TexExpr;
+            }
+            else if (ExpressionType == TEXT("ScalarParameter"))
+            {
+                UMaterialExpressionScalarParameter* ScalarParam = NewObject<UMaterialExpressionScalarParameter>(Material);
+                FString ParamName;
+                if (NodeObj->TryGetStringField(TEXT("parameter_name"), ParamName))
+                {
+                    ScalarParam->ParameterName = FName(*ParamName);
+                }
+                float DefaultValue = 0.0f;
+                if (NodeObj->TryGetNumberField(TEXT("value"), DefaultValue))
+                {
+                    ScalarParam->DefaultValue = DefaultValue;
+                }
+                FString Group;
+                if (NodeObj->TryGetStringField(TEXT("group"), Group))
+                {
+                    ScalarParam->Group = FName(*Group);
+                }
+                NewExpression = ScalarParam;
+            }
+            else if (ExpressionType == TEXT("VectorParameter"))
+            {
+                UMaterialExpressionVectorParameter* VectorParam = NewObject<UMaterialExpressionVectorParameter>(Material);
+                FString ParamName;
+                if (NodeObj->TryGetStringField(TEXT("parameter_name"), ParamName))
+                {
+                    VectorParam->ParameterName = FName(*ParamName);
+                }
+                const TArray<TSharedPtr<FJsonValue>>* ValueArray = nullptr;
+                if (NodeObj->TryGetArrayField(TEXT("value"), ValueArray) && ValueArray && ValueArray->Num() >= 4)
+                {
+                    VectorParam->DefaultValue.R = (*ValueArray)[0]->AsNumber();
+                    VectorParam->DefaultValue.G = (*ValueArray)[1]->AsNumber();
+                    VectorParam->DefaultValue.B = (*ValueArray)[2]->AsNumber();
+                    VectorParam->DefaultValue.A = (*ValueArray)[3]->AsNumber();
+                }
+                FString Group;
+                if (NodeObj->TryGetStringField(TEXT("group"), Group))
+                {
+                    VectorParam->Group = FName(*Group);
+                }
+                NewExpression = VectorParam;
+            }
+            else if (ExpressionType == TEXT("TextureCoordinate"))
+            {
+                NewExpression = NewObject<UMaterialExpressionTextureCoordinate>(Material);
+            }
+            else if (ExpressionType == TEXT("Time"))
+            {
+                NewExpression = NewObject<UMaterialExpressionTime>(Material);
+            }
+            else if (ExpressionType == TEXT("VertexNormal"))
+            {
+                NewExpression = NewObject<UMaterialExpressionVertexNormalWS>(Material);
+            }
+            else if (ExpressionType == TEXT("WorldPosition"))
+            {
+                NewExpression = NewObject<UMaterialExpressionWorldPosition>(Material);
+            }
+            else if (ExpressionType == TEXT("OneMinus"))
+            {
+                NewExpression = NewObject<UMaterialExpressionOneMinus>(Material);
+            }
+            else if (ExpressionType == TEXT("Saturate"))
+            {
+                NewExpression = NewObject<UMaterialExpressionSaturate>(Material);
+            }
+            else if (ExpressionType == TEXT("Normalize"))
+            {
+                NewExpression = NewObject<UMaterialExpressionNormalize>(Material);
+            }
+            else if (ExpressionType == TEXT("DotProduct"))
+            {
+                NewExpression = NewObject<UMaterialExpressionDotProduct>(Material);
+            }
+            else if (ExpressionType == TEXT("CrossProduct"))
+            {
+                NewExpression = NewObject<UMaterialExpressionCrossProduct>(Material);
+            }
+            else if (ExpressionType == TEXT("ComponentMask"))
+            {
+                UMaterialExpressionComponentMask* Mask = NewObject<UMaterialExpressionComponentMask>(Material);
+                bool bR = false, bG = false, bB = false, bA = false;
+                NodeObj->TryGetBoolField(TEXT("mask_r"), bR);
+                NodeObj->TryGetBoolField(TEXT("mask_g"), bG);
+                NodeObj->TryGetBoolField(TEXT("mask_b"), bB);
+                NodeObj->TryGetBoolField(TEXT("mask_a"), bA);
+                Mask->R = bR;
+                Mask->G = bG;
+                Mask->B = bB;
+                Mask->A = bA;
+                NewExpression = Mask;
+            }
+            else if (ExpressionType == TEXT("AppendVector"))
+            {
+                NewExpression = NewObject<UMaterialExpressionAppendVector>(Material);
+            }
+            else if (ExpressionType == TEXT("Fresnel"))
+            {
+                NewExpression = NewObject<UMaterialExpressionFresnel>(Material);
+            }
+            else if (ExpressionType == TEXT("Power"))
+            {
+                NewExpression = NewObject<UMaterialExpressionPower>(Material);
+            }
+            else if (ExpressionType == TEXT("Panner"))
+            {
+                NewExpression = NewObject<UMaterialExpressionPanner>(Material);
+            }
+            else if (ExpressionType == TEXT("Rotator"))
+            {
+                NewExpression = NewObject<UMaterialExpressionRotator>(Material);
+            }
+            else if (ExpressionType == TEXT("Sine"))
+            {
+                NewExpression = NewObject<UMaterialExpressionSine>(Material);
+            }
+            else if (ExpressionType == TEXT("Cosine"))
+            {
+                NewExpression = NewObject<UMaterialExpressionCosine>(Material);
+            }
+            else if (ExpressionType == TEXT("Abs"))
+            {
+                NewExpression = NewObject<UMaterialExpressionAbs>(Material);
+            }
+            else if (ExpressionType == TEXT("Floor"))
+            {
+                NewExpression = NewObject<UMaterialExpressionFloor>(Material);
+            }
+            else if (ExpressionType == TEXT("Ceil"))
+            {
+                NewExpression = NewObject<UMaterialExpressionCeil>(Material);
+            }
+            else if (ExpressionType == TEXT("Frac"))
+            {
+                NewExpression = NewObject<UMaterialExpressionFrac>(Material);
+            }
+            else if (ExpressionType == TEXT("SquareRoot"))
+            {
+                NewExpression = NewObject<UMaterialExpressionSquareRoot>(Material);
+            }
+            else if (ExpressionType == TEXT("Desaturation"))
+            {
+                NewExpression = NewObject<UMaterialExpressionDesaturation>(Material);
+            }
+            else if (ExpressionType == TEXT("ReflectionVector"))
+            {
+                NewExpression = NewObject<UMaterialExpressionReflectionVectorWS>(Material);
+            }
+            else if (ExpressionType == TEXT("CameraPosition"))
+            {
+                NewExpression = NewObject<UMaterialExpressionCameraPositionWS>(Material);
+            }
+            else if (ExpressionType == TEXT("CameraVector"))
+            {
+                NewExpression = NewObject<UMaterialExpressionCameraVectorWS>(Material);
+            }
+
+            if (NewExpression)
+            {
+                // Set position
+                NewExpression->MaterialExpressionEditorX = PosX;
+                NewExpression->MaterialExpressionEditorY = PosY;
+
+                // Add to material
+                Material->GetExpressionCollection().AddExpression(NewExpression);
+
+                // Store in map
+                NodeIdToExpression.Add(NodeId, NewExpression);
+
+                // Track created node
+                TSharedPtr<FJsonObject> CreatedNodeObj = MakeShared<FJsonObject>();
+                CreatedNodeObj->SetStringField(TEXT("id"), NodeId);
+                CreatedNodeObj->SetStringField(TEXT("type"), ExpressionType);
+                FString ActualNodeId = FString::Printf(TEXT("Expr_%s_%d"), *ExpressionType, NewExpression->GetUniqueID());
+                CreatedNodeObj->SetStringField(TEXT("node_id"), ActualNodeId);
+                CreatedNodesArray.Add(MakeShared<FJsonValueObject>(CreatedNodeObj));
+
+                NodeCount++;
+            }
+        }
+    }
+
+    // Process connections array
+    const TArray<TSharedPtr<FJsonValue>>* ConnectionsArray = nullptr;
+    if (Params->TryGetArrayField(TEXT("connections"), ConnectionsArray) && ConnectionsArray)
+    {
+        for (const TSharedPtr<FJsonValue>& ConnValue : *ConnectionsArray)
+        {
+            if (!ConnValue.IsValid()) continue;
+            
+            TSharedPtr<FJsonObject> ConnObj = ConnValue->AsObject();
+            if (!ConnObj.IsValid()) continue;
+
+            FString SourceId, TargetId;
+            if (!ConnObj->TryGetStringField(TEXT("source"), SourceId) || 
+                !ConnObj->TryGetStringField(TEXT("target"), TargetId))
+            {
+                continue;
+            }
+
+            FString SourceOutput = TEXT("Output");
+            ConnObj->TryGetStringField(TEXT("source_output"), SourceOutput);
+
+            FString TargetInput;
+            ConnObj->TryGetStringField(TEXT("target_input"), TargetInput);
+
+            // Handle connection to material property
+            if (TargetId == TEXT("Material"))
+            {
+                UMaterialExpression** SourceExpr = NodeIdToExpression.Find(SourceId);
+                if (SourceExpr && *SourceExpr)
+                {
+                    FExpressionInput* PropertyInput = GetMaterialPropertyInput(Material, TargetInput);
+                    if (PropertyInput)
+                    {
+                        PropertyInput->Expression = *SourceExpr;
+                        PropertyInput->OutputIndex = 0;
+                        ConnectionCount++;
+                    }
+                }
+            }
+            else
+            {
+                // Handle node-to-node connection
+                UMaterialExpression** SourceExpr = NodeIdToExpression.Find(SourceId);
+                UMaterialExpression** TargetExpr = NodeIdToExpression.Find(TargetId);
+
+                if (SourceExpr && TargetExpr && *SourceExpr && *TargetExpr)
+                {
+                    FExpressionInput* InputPtr = GetExpressionInputByName(*TargetExpr, TargetInput);
+                    if (InputPtr)
+                    {
+                        InputPtr->Expression = *SourceExpr;
+                        InputPtr->OutputIndex = (SourceOutput == TEXT("Output")) ? 0 : 0; // Default to 0
+                        ConnectionCount++;
+                    }
+                }
+            }
+        }
+    }
+
+    // Process material properties if provided
+    TSharedPtr<FJsonObject> PropertiesObj = Params->GetObjectField(TEXT("properties"));
+    if (PropertiesObj.IsValid())
+    {
+        // Shading Model
+        FString ShadingModel;
+        if (PropertiesObj->TryGetStringField(TEXT("shading_model"), ShadingModel))
+        {
+            if (ShadingModel == TEXT("Unlit"))
+                Material->SetShadingModel(EMaterialShadingModel::MSM_Unlit);
+            else if (ShadingModel == TEXT("DefaultLit"))
+                Material->SetShadingModel(EMaterialShadingModel::MSM_DefaultLit);
+            else if (ShadingModel == TEXT("Subsurface"))
+                Material->SetShadingModel(EMaterialShadingModel::MSM_Subsurface);
+            else if (ShadingModel == TEXT("TwoSidedFoliage"))
+                Material->SetShadingModel(EMaterialShadingModel::MSM_TwoSidedFoliage);
+        }
+
+        // Blend Mode
+        FString BlendMode;
+        if (PropertiesObj->TryGetStringField(TEXT("blend_mode"), BlendMode))
+        {
+            if (BlendMode == TEXT("Opaque"))
+                Material->BlendMode = EBlendMode::BLEND_Opaque;
+            else if (BlendMode == TEXT("Masked"))
+                Material->BlendMode = EBlendMode::BLEND_Masked;
+            else if (BlendMode == TEXT("Translucent"))
+                Material->BlendMode = EBlendMode::BLEND_Translucent;
+            else if (BlendMode == TEXT("Additive"))
+                Material->BlendMode = EBlendMode::BLEND_Additive;
+        }
+
+        // Two Sided
+        bool bTwoSided;
+        if (PropertiesObj->TryGetBoolField(TEXT("two_sided"), bTwoSided))
+        {
+            Material->TwoSided = bTwoSided ? 1 : 0;
+        }
+
+        // Material Domain
+        FString MaterialDomain;
+        if (PropertiesObj->TryGetStringField(TEXT("material_domain"), MaterialDomain))
+        {
+            if (MaterialDomain == TEXT("Surface"))
+                Material->MaterialDomain = (EMaterialDomain)0;
+            else if (MaterialDomain == TEXT("DeferredDecal"))
+                Material->MaterialDomain = (EMaterialDomain)1;
+            else if (MaterialDomain == TEXT("LightFunction"))
+                Material->MaterialDomain = (EMaterialDomain)2;
+            else if (MaterialDomain == TEXT("PostProcess"))
+                Material->MaterialDomain = (EMaterialDomain)4;
+        }
+    }
+
+    // Mark material as dirty
+    Material->MarkPackageDirty();
+
+    // Compile if requested
+    bool bShouldCompile = true;
+    Params->TryGetBoolField(TEXT("compile"), bShouldCompile);
+    if (bShouldCompile)
+    {
+        Material->ForceRecompileForRendering();
+    }
+
+    // Build result
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("material_name"), MaterialName);
+    ResultObj->SetNumberField(TEXT("node_count"), NodeCount);
+    ResultObj->SetNumberField(TEXT("connection_count"), ConnectionCount);
+    ResultObj->SetArrayField(TEXT("nodes"), CreatedNodesArray);
+    ResultObj->SetBoolField(TEXT("compiled"), bShouldCompile);
     ResultObj->SetBoolField(TEXT("success"), true);
 
     return ResultObj;

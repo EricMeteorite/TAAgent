@@ -256,9 +256,10 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                      CommandType == TEXT("analyze_blueprint_graph") ||
                      CommandType == TEXT("get_blueprint_variable_details") ||
                      CommandType == TEXT("get_blueprint_function_details") ||
-                    CommandType == TEXT("add_material_expression") ||
-                    CommandType == TEXT("connect_material_nodes") ||
-                    CommandType == TEXT("set_material_properties") ||
+                     CommandType == TEXT("add_material_expression") ||
+                     CommandType == TEXT("connect_material_nodes") ||
+                     CommandType == TEXT("build_material_graph") ||
+                     CommandType == TEXT("set_material_properties") ||
                     CommandType == TEXT("compile_material") ||
                     CommandType == TEXT("get_material_expressions") ||
                     CommandType == TEXT("create_material_function") ||

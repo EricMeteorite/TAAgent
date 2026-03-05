@@ -642,6 +642,8 @@ def add_material_expression(
     sampler_type: str = None
 ) -> Dict[str, Any]:
     """
+    [DEPRECATED] Use build_material_graph instead for batch operations.
+    
     Add a material expression node to a material, or update an existing node.
     
     Args:
@@ -680,6 +682,7 @@ def add_material_expression(
                 PixelDepth, SceneDepth, ReflectionVector, LightVector,
                 Distance, Desaturation, If, StaticSwitch, Custom
     """
+    logger.warning("add_material_expression is deprecated. Use build_material_graph for better performance.")
     unreal = get_unreal_connection()
     try:
         params = {
@@ -740,6 +743,7 @@ def connect_material_nodes(
     Returns:
         Dictionary with success status and connection details
     """
+    logger.warning("connect_material_nodes is deprecated. Use build_material_graph for better performance.")
     unreal = get_unreal_connection()
     try:
         params = {
@@ -753,6 +757,72 @@ def connect_material_nodes(
         return response or {"success": False, "message": "No response from Unreal"}
     except Exception as e:
         logger.error(f"connect_material_nodes error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
+def build_material_graph(
+    material_name: str,
+    nodes: List[Dict[str, Any]],
+    connections: List[Dict[str, Any]] = None,
+    properties: Dict[str, Any] = None,
+    compile: bool = True
+) -> Dict[str, Any]:
+    """
+    Build an entire material graph in a single call (batch operation).
+    
+    This is the recommended way to create materials. It replaces multiple
+    add_material_expression and connect_material_nodes calls with a single
+    atomic operation.
+    
+    Args:
+        material_name: Name or path of the material (must already exist)
+        nodes: List of node definitions, each containing:
+            - id: Unique node identifier (user-defined)
+            - type: Expression type (Constant, Constant3Vector, Multiply, TextureSample, etc.)
+            - pos_x, pos_y: Node position in graph (optional)
+            - ... type-specific properties (value, texture, parameter_name, etc.)
+        connections: List of connection definitions, each containing:
+            - source: Source node ID
+            - target: Target node ID (use "Material" for material properties)
+            - source_output: Output pin name (default: "Output")
+            - target_input: Input pin name or material property name
+        properties: Optional material properties to set (shading_model, blend_mode, etc.)
+        compile: Whether to compile the material after building (default: True)
+    
+    Returns:
+        Dictionary with success status, node_count, connection_count
+    
+    Example:
+        build_material_graph(
+            material_name="M_MyMaterial",
+            nodes=[
+                {"id": "color", "type": "Constant3Vector", "pos_x": -300, "pos_y": 0, "value": [1.0, 0.0, 0.0]},
+                {"id": "roughness", "type": "Constant", "pos_x": -300, "pos_y": 200, "value": 0.5}
+            ],
+            connections=[
+                {"source": "color", "target": "Material", "target_input": "BaseColor"},
+                {"source": "roughness", "target": "Material", "target_input": "Roughness"}
+            ],
+            properties={"shading_model": "DefaultLit"}
+        )
+    """
+    unreal = get_unreal_connection()
+    try:
+        params = {
+            "material_name": material_name,
+            "nodes": nodes,
+            "compile": compile
+        }
+        if connections:
+            params["connections"] = connections
+        if properties:
+            params["properties"] = properties
+        
+        response = unreal.send_command("build_material_graph", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"build_material_graph error: {e}")
         return {"success": False, "message": str(e)}
 
 

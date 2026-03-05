@@ -86,7 +86,7 @@ python src/scripts/install_extension.py
 | **Texture** | `get_texture_info`, `get_texture_data`, `save_texture` |
 | **Mesh** | `get_mesh_data`, `export_mesh_as_fbx`, `get_buffer_contents`, `export_mesh_csv` |
 
-### Unreal Render MCP (23 Tools)
+### Unreal Render MCP (24 Tools)
 
 **Generic Asset Tools** (6) - *New reflection-based*
 ```python
@@ -110,9 +110,13 @@ batch_delete_actors(names)
 batch_set_actors_properties(items)
 ```
 
-**Material Graph** (4): `add_material_expression`, `connect_material_nodes`, `get_material_expressions`, `get_material_connections`
+**Material Graph** (Recommended): `build_material_graph` - Batch build entire material graphs in one call
 
-**Other** (5): `get_material_properties`, `get_material_functions`, `import_texture`, `import_fbx`, `get_viewport_screenshot`
+**Material Analysis** (4): `get_material_expressions`, `get_material_connections`, `get_material_properties`, `get_material_functions`
+
+**Import** (2): `import_texture`, `import_fbx`
+
+**Viewport** (1): `get_viewport_screenshot`
 
 ## Usage Examples
 
@@ -176,6 +180,30 @@ batch_set_actors_properties([
     {"name": "KeyLight", "properties": {"intensity": 15.0}},
     {"name": "FillLight", "properties": {"intensity": 8.0}}
 ])
+```
+
+### Batch Material Graph Building
+
+```python
+# Build entire material graph in one call (replaces multiple add/connect calls)
+build_material_graph(
+    material_name="M_MyMaterial",
+    nodes=[
+        {"id": "color", "type": "Constant3Vector", "pos_x": -300, "pos_y": 0, 
+         "value": [1.0, 0.0, 0.0]},
+        {"id": "roughness", "type": "Constant", "pos_x": -300, "pos_y": 200, 
+         "value": 0.5},
+        {"id": "tex_base", "type": "TextureSample", "pos_x": -500, "pos_y": 0,
+         "texture": "/Game/Textures/T_BaseColor"}
+    ],
+    connections=[
+        {"source": "tex_base", "target": "Material", "target_input": "BaseColor"},
+        {"source": "color", "target": "Material", "target_input": "EmissiveColor"},
+        {"source": "roughness", "target": "Material", "target_input": "Roughness"}
+    ],
+    properties={"shading_model": "DefaultLit", "blend_mode": "Opaque"},
+    compile=True
+)
 ```
 
 ## Skills
