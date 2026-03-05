@@ -979,6 +979,258 @@ def create_static_mesh_from_data(
 
 
 # ============================================================================
+# Viewport Tools (1 tool)
+# ============================================================================
+
+@mcp.tool()
+def get_viewport_screenshot(
+    output_path: str,
+    format: str = "png",
+    quality: int = 85,
+    include_ui: bool = False
+) -> Dict[str, Any]:
+    """
+    Capture a screenshot of the current viewport and save as image file.
+    
+    Args:
+        output_path: Full path where to save the screenshot (e.g., "C:/temp/screenshot.png")
+        format: Image format - "png", "jpg", or "bmp" (default: "png")
+        quality: JPEG quality 1-100 (only for jpg, default: 85)
+        include_ui: Whether to include editor UI (default: False)
+    
+    Returns:
+        Dictionary with:
+        - success: Whether the capture succeeded
+        - file_path: Path to the saved image file
+        - format: Image format
+        - width: Image width in pixels
+        - height: Image height in pixels
+        - size_bytes: Size of the image data in bytes
+        - viewport_type: Type of viewport captured ("Editor", "PIE", or "Game")
+    
+    Note:
+        This captures the active viewport - either the editor viewport or PIE/Game viewport.
+    """
+    unreal = get_unreal_connection()
+    try:
+        params = {
+            "output_path": output_path,
+            "format": format,
+            "quality": quality,
+            "include_ui": include_ui
+        }
+        response = unreal.send_command("get_viewport_screenshot", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"get_viewport_screenshot error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+# ============================================================================
+# Light Tools (4 tools)
+# ============================================================================
+
+@mcp.tool()
+def create_light(
+    light_type: str = "point",
+    name: str = None,
+    location: List[float] = None,
+    rotation: List[float] = None,
+    intensity: float = None,
+    color: List[float] = None,
+    mobility: str = "movable",
+    cast_shadows: bool = True,
+    attenuation_radius: float = None,
+    inner_cone_angle: float = None,
+    outer_cone_angle: float = None,
+    source_radius: float = None
+) -> Dict[str, Any]:
+    """
+    Create a light in the scene.
+    
+    Args:
+        light_type: Type of light - "point", "directional", "spot", "rect" (default: "point")
+        name: Name for the light (auto-generated if not provided)
+        location: World position [x, y, z] (default: [0, 0, 200])
+        rotation: World rotation [pitch, yaw, roll] in degrees (default: [0, 0, 0])
+        intensity: Light intensity/brightness
+        color: Light color [r, g, b] or [r, g, b, a] (0.0-1.0)
+        mobility: "movable", "stationary", or "static" (default: "movable")
+        cast_shadows: Whether light casts shadows (default: True)
+        attenuation_radius: Attenuation radius for point/spot lights
+        inner_cone_angle: Inner cone angle for spot lights (degrees)
+        outer_cone_angle: Outer cone angle for spot lights (degrees)
+        source_radius: Source radius for point/spot lights (soft shadows)
+    
+    Returns:
+        Dictionary with light name, type, and actor path
+    """
+    unreal = get_unreal_connection()
+    try:
+        params = {"light_type": light_type}
+        if name:
+            params["name"] = name
+        if location:
+            params["location"] = location
+        if rotation:
+            params["rotation"] = rotation
+        if intensity is not None:
+            params["intensity"] = intensity
+        if color:
+            params["color"] = color
+        params["mobility"] = mobility
+        params["cast_shadows"] = cast_shadows
+        if attenuation_radius is not None:
+            params["attenuation_radius"] = attenuation_radius
+        if inner_cone_angle is not None:
+            params["inner_cone_angle"] = inner_cone_angle
+        if outer_cone_angle is not None:
+            params["outer_cone_angle"] = outer_cone_angle
+        if source_radius is not None:
+            params["source_radius"] = source_radius
+        
+        response = unreal.send_command("create_light", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"create_light error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
+def set_light_properties(
+    name: str,
+    intensity: float = None,
+    color: List[float] = None,
+    temperature: float = None,
+    use_temperature: bool = None,
+    cast_shadows: bool = None,
+    affects_world: bool = None,
+    location: List[float] = None,
+    rotation: List[float] = None,
+    attenuation_radius: float = None,
+    inner_cone_angle: float = None,
+    outer_cone_angle: float = None,
+    source_radius: float = None,
+    source_length: float = None,
+    shadow_distance: float = None
+) -> Dict[str, Any]:
+    """
+    Set properties of an existing light.
+    
+    Args:
+        name: Name or path of the light
+        intensity: Light intensity/brightness
+        color: Light color [r, g, b] or [r, g, b, a] (0.0-1.0)
+        temperature: Color temperature in Kelvin (1700-12000)
+        use_temperature: Whether to use temperature instead of color
+        cast_shadows: Whether light casts shadows
+        affects_world: Whether light affects the world
+        location: World position [x, y, z]
+        rotation: World rotation [pitch, yaw, roll] in degrees
+        attenuation_radius: Attenuation radius for point/spot lights
+        inner_cone_angle: Inner cone angle for spot lights (degrees)
+        outer_cone_angle: Outer cone angle for spot lights (degrees)
+        source_radius: Source radius for soft shadows
+        source_length: Source length for point lights
+        shadow_distance: Shadow distance for directional lights
+    
+    Returns:
+        Dictionary with success status and modification info
+    """
+    unreal = get_unreal_connection()
+    try:
+        params = {"name": name}
+        if intensity is not None:
+            params["intensity"] = intensity
+        if color:
+            params["color"] = color
+        if temperature is not None:
+            params["temperature"] = temperature
+        if use_temperature is not None:
+            params["use_temperature"] = use_temperature
+        if cast_shadows is not None:
+            params["cast_shadows"] = cast_shadows
+        if affects_world is not None:
+            params["affects_world"] = affects_world
+        if location:
+            params["location"] = location
+        if rotation:
+            params["rotation"] = rotation
+        if attenuation_radius is not None:
+            params["attenuation_radius"] = attenuation_radius
+        if inner_cone_angle is not None:
+            params["inner_cone_angle"] = inner_cone_angle
+        if outer_cone_angle is not None:
+            params["outer_cone_angle"] = outer_cone_angle
+        if source_radius is not None:
+            params["source_radius"] = source_radius
+        if source_length is not None:
+            params["source_length"] = source_length
+        if shadow_distance is not None:
+            params["shadow_distance"] = shadow_distance
+        
+        response = unreal.send_command("set_light_properties", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"set_light_properties error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
+def get_lights(light_type: str = None) -> Dict[str, Any]:
+    """
+    Get list of all lights in the current level.
+    
+    Args:
+        light_type: Optional filter by type - "point", "directional", "spot", "rect"
+    
+    Returns:
+        Dictionary with list of lights, each containing:
+        - name: Light actor name
+        - label: Actor label
+        - light_type: Type of light
+        - path: Full actor path
+        - location: World position [x, y, z]
+        - rotation: World rotation [pitch, yaw, roll]
+        - intensity: Light intensity
+        - color: Light color [r, g, b, a]
+        - cast_shadows: Whether casts shadows
+        - affects_world: Whether affects world
+        - mobility: Component mobility type
+    """
+    unreal = get_unreal_connection()
+    try:
+        params = {}
+        if light_type:
+            params["light_type"] = light_type
+        response = unreal.send_command("get_lights", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"get_lights error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
+def delete_light(name: str) -> Dict[str, Any]:
+    """
+    Delete a light from the scene.
+    
+    Args:
+        name: Name or path of the light to delete
+    
+    Returns:
+        Dictionary with success status and deleted light name
+    """
+    unreal = get_unreal_connection()
+    try:
+        response = unreal.send_command("delete_light", {"name": name})
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"delete_light error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+# ============================================================================
 # Main Entry Point
 # ============================================================================
 

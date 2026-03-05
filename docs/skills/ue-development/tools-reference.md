@@ -290,6 +290,233 @@ Modify actor position, rotation, and scale.
 
 ---
 
+## 🎨 Material Analysis Tools
+
+Tools for analyzing existing UE materials.
+
+### get_available_materials
+List all materials available in the project.
+
+**Parameters:**
+- `search_path` (string): Path to search (default: "/Game/")
+
+**Returns:** List of material paths.
+
+**Example:**
+```bash
+get_available_materials(search_path="/Engine/BasicShapes/")
+```
+
+### get_material_properties
+Get material attributes including blend mode, shading model, etc.
+
+**Parameters:**
+- `material_name` (string): Material path or name
+
+**Returns:**
+- `blend_mode`: Opaque, Masked, Translucent, Additive, etc.
+- `shading_models`: List of enabled shading models
+- `two_sided`: Whether material is two-sided
+- `material_domain`: Surface, UI, PostProcess, etc.
+- `is_masked`: Whether material uses masking
+- `opacity_mask_clip_value`: Clip threshold for masked materials
+
+**Example:**
+```bash
+get_material_properties(material_name="/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial")
+```
+
+### get_material_expressions
+List all expression nodes in a material graph.
+
+**Parameters:**
+- `material_name` (string): Material path or name
+
+**Returns:** List of nodes with:
+- `node_id`: Unique identifier
+- `type`: Expression class name
+- `position`: [x, y] in graph
+- Parameters specific to each expression type
+- `function_path`: For MaterialFunctionCall nodes
+
+**Example:**
+```bash
+get_material_expressions(material_name="/Game/Materials/M_Water")
+```
+
+### get_material_connections
+Get node connection relationships in a material.
+
+**Parameters:**
+- `material_name` (string): Material path or name
+
+**Returns:**
+- `node_connections`: List of nodes with input connections
+- `property_connections`: Connections to material properties (BaseColor, Normal, etc.)
+
+**Example:**
+```bash
+get_material_connections(material_name="/Game/Materials/M_Water")
+```
+
+### get_material_function_content
+Get detailed content of a Material Function including internal node connections.
+
+**Parameters:**
+- `function_path` (string): Full path to the Material Function
+
+**Returns:**
+- `inputs`: Function input parameters
+- `outputs`: Function output pins
+- `expressions`: Internal expression nodes (with `node_id` for each)
+- `connections`: Node connection relationships (new!)
+  - `from`: Source node ID
+  - `to`: Target node ID
+  - `from_output`: Output pin name on source node
+  - `to_input`: Input pin name on target node
+- `connection_count`: Total number of connections
+
+**Example:**
+```bash
+get_material_function_content(
+    function_path="/Engine/Functions/Engine_MaterialFunctions01/Texturing/BitMask.BitMask"
+)
+```
+
+**Connection Example:**
+```json
+{
+  "connections": [
+    {
+      "from": "Expr_Constant_1234",
+      "to": "Expr_Multiply_5678",
+      "from_output": "Output_0",
+      "to_input": "A"
+    }
+  ]
+}
+```
+
+**Note:** This allows full reconstruction of Material Function node graphs, including nested MaterialFunctionCalls.
+
+**See Also:** `material-analysis.md` for complete workflow documentation.
+
+---
+
+## 📷 Viewport Tools
+
+Tools for capturing and analyzing viewport content.
+
+### get_viewport_screenshot
+Capture a screenshot of the current viewport and save as image file.
+
+**Parameters:**
+- `output_path` (string, **required**): Full path where to save the screenshot (e.g., "C:/temp/screenshot.png")
+- `format` (string): Image format - "png", "jpg", or "bmp" (default: "png")
+- `quality` (int): JPEG quality 1-100 (only for jpg, default: 85)
+- `include_ui` (bool): Whether to include editor UI (default: false)
+
+**Returns:**
+- `success`: Whether the capture succeeded
+- `file_path`: Path to the saved image file
+- `format`: Image format
+- `width`: Image width in pixels
+- `height`: Image height in pixels
+- `size_bytes`: Size of the image data in bytes
+- `viewport_type`: Type of viewport captured ("Editor", "PIE", or "Game")
+
+**Example:**
+```bash
+# Capture PNG screenshot
+get_viewport_screenshot(output_path="C:/temp/screenshot.png")
+
+# Capture JPEG with lower quality
+get_viewport_screenshot(output_path="C:/temp/screenshot.jpg", format="jpg", quality=50)
+```
+
+**Note:** Captures the active viewport - either the editor viewport or PIE/Game viewport. The image is saved directly to the specified file path.
+
+---
+
+## 💡 Light Tools
+
+Tools for creating and managing lights in the scene.
+
+### create_light
+Create a light in the scene.
+
+**Parameters:**
+- `light_type` (string): Type of light - "point", "directional", "spot", "rect" (default: "point")
+- `name` (string): Name for the light (auto-generated if not provided)
+- `location` (array): World position [x, y, z] (default: [0, 0, 200])
+- `rotation` (array): World rotation [pitch, yaw, roll] in degrees
+- `intensity` (float): Light intensity/brightness
+- `color` (array): Light color [r, g, b] or [r, g, b, a] (0.0-1.0)
+- `mobility` (string): "movable", "stationary", or "static" (default: "movable")
+- `cast_shadows` (bool): Whether light casts shadows (default: true)
+- `attenuation_radius` (float): Attenuation radius for point/spot lights
+- `inner_cone_angle` (float): Inner cone angle for spot lights (degrees)
+- `outer_cone_angle` (float): Outer cone angle for spot lights (degrees)
+- `source_radius` (float): Source radius for soft shadows
+
+**Example:**
+```bash
+# Create a point light
+create_light(light_type="point", intensity=1000.0, location=[0, 0, 300])
+
+# Create a directional light (sun)
+create_light(light_type="directional", intensity=10.0, rotation=[-45, 0, 0])
+
+# Create a spot light
+create_light(light_type="spot", intensity=2000.0, outer_cone_angle=45.0)
+```
+
+### set_light_properties
+Set properties of an existing light.
+
+**Parameters:**
+- `name` (string): Name or path of the light (required)
+- `intensity` (float): Light intensity/brightness
+- `color` (array): Light color [r, g, b] or [r, g, b, a]
+- `temperature` (float): Color temperature in Kelvin (1700-12000)
+- `use_temperature` (bool): Whether to use temperature instead of color
+- `cast_shadows` (bool): Whether light casts shadows
+- `location` (array): World position [x, y, z]
+- `rotation` (array): World rotation [pitch, yaw, roll]
+- ... (more type-specific parameters)
+
+**Example:**
+```bash
+set_light_properties(name="PointLight_0", intensity=5000.0, color=[1.0, 0.9, 0.8])
+```
+
+### get_lights
+Get list of all lights in the current level.
+
+**Parameters:**
+- `light_type` (string): Optional filter by type - "point", "directional", "spot", "rect"
+
+**Returns:** List of lights with name, type, location, intensity, color, etc.
+
+**Example:**
+```bash
+get_lights()
+get_lights(light_type="directional")
+```
+
+### delete_light
+Delete a light from the scene.
+
+**Parameters:**
+- `name` (string): Name or path of the light to delete
+
+**Example:**
+```bash
+delete_light(name="PointLight_0")
+```
+
+---
+
 ## 💡 Usage Tips
 
 ### Performance Optimization

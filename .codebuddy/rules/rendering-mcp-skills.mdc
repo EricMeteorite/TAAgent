@@ -30,11 +30,14 @@ This rule provides quick reference for all skills in the Rendering MCP project.
 
 ### 3. UE Development (`docs/skills/ue-development/`)
 - **Purpose**: UE development workflows via MCP
-- **Key Files**: `tools-reference.md`, `blueprint-graph-guide.md`, `material-functions/`
+- **Key Files**: `tools-reference.md`, `blueprint-graph-guide.md`, `material-functions/`, `material-analysis.md`
 - **Tool Categories**:
   - Materials: `create_material`, `add_material_expression`, `connect_material_nodes`, `compile_material`
+  - **Material Analysis**: `get_available_materials`, `get_material_properties`, `get_material_expressions`, `get_material_connections`
   - Textures: `import_texture`, `set_texture_properties`
   - Meshes: `import_fbx`, `create_static_mesh_from_data`
+  - **Lights**: `create_light`, `set_light_properties`, `get_lights`, `delete_light`
+  - **Viewport**: `get_viewport_screenshot`
   - Niagara: `spawn_niagara_system`, `set_niagara_*_parameter`
 
 ### 4. RenderDoc Material Reconstruction (`docs/skills/renderdoc-material-reconstruction/`)
@@ -44,6 +47,16 @@ This rule provides quick reference for all skills in the Rendering MCP project.
 ### 5. Shadertoy Conversion (`docs/skills/shadertoy-conversion/`)
 - **Purpose**: Convert Shadertoy shaders to UE materials
 - **Key Files**: `guide.md`
+
+### 6. Lookdev (`docs/skills/lookdev/`)
+- **Purpose**: Asset review environment setup for consistent material validation
+- **Key Files**: `skill.md`
+- **Core Concepts**:
+  - EV100=0 曝光基准
+  - 灰板测光：Linear 0.18 (sRGB 119)
+  - 三种光比环境：低(1.65x)、中(2.6x)、高(16x)
+  - 中性光源：6500K
+- **MCP Tools**: `create_light`, `set_light_properties`, `get_lights`, `get_viewport_screenshot`
 
 ## Common Issues & Solutions
 
@@ -55,6 +68,11 @@ This rule provides quick reference for all skills in the Rendering MCP project.
 | FBX 比例错误 | fbx-export | 调整 `unit_scale` 参数 |
 | 光照问题 | fbx-export | 使用 `vs_input` 而非 `vs_output` |
 | 链接错误 | project-setup | 检查 Build.cs 是否添加了必要模块依赖 |
+| 材质节点不完整 | ue-development | 使用 `get_material_connections` 获取连接关系 |
+| 材质函数未展开 | ue-development | 单独调用 `get_material_function_content` |
+| 资产曝光不准 | lookdev | 使用灰板测光，确保 EV100=0 |
+| 材质对比度过大 | lookdev | 检查光比设置，增加环境光 |
+| DCC预览不一致 | lookdev | 匹配 HDRI 和 Tonemapping 设置 |
 
 ## File Locations
 
@@ -74,3 +92,8 @@ d:\CodeBuddy\rendering-mcp\
 - `FPolygonGroupArray` 使用 `GetFirstValidID()` 而非 `[0]`
 - `BuildFromMeshDescriptions()` 需要数组参数
 - `EngineUtils.h` 包含 `TActorIterator`
+- `ULightComponent` 有 `SetIntensity/SetLightColor`，`ULightComponentBase` 没有
+- `bAffectsWorld` 是属性，直接赋值而非 setter 方法
+- `IImageWrapper::GetCompressed(Quality)` 质量参数直接传入
+- `IAssetViewport::GetSharedActiveViewport()` 返回 `TSharedPtr<FSceneViewport>`
+- `#include "Misc/Base64.h"` (不是 `HAL/Base64.h`)

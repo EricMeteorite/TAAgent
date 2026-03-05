@@ -1,5 +1,6 @@
 #include "Commands/EpicUnrealMCPBlueprintCommands.h"
 #include "Commands/EpicUnrealMCPCommonUtils.h"
+#include "Commands/EpicUnrealMCPEnvironmentCommands.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/StaticMesh.h"
@@ -249,6 +250,27 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleCommand(const FSt
     else if (CommandType == TEXT("get_blueprint_function_details"))
     {
         return HandleGetBlueprintFunctionDetails(Params);
+    }
+    // Viewport and Light commands - delegated to EnvironmentCommands
+    else if (CommandType == TEXT("get_viewport_screenshot"))
+    {
+        return FEpicUnrealMCPEnvironmentCommands::HandleGetViewportScreenshot(Params);
+    }
+    else if (CommandType == TEXT("create_light"))
+    {
+        return FEpicUnrealMCPEnvironmentCommands::HandleCreateLight(Params);
+    }
+    else if (CommandType == TEXT("set_light_properties"))
+    {
+        return FEpicUnrealMCPEnvironmentCommands::HandleSetLightProperties(Params);
+    }
+    else if (CommandType == TEXT("get_lights"))
+    {
+        return FEpicUnrealMCPEnvironmentCommands::HandleGetLights(Params);
+    }
+    else if (CommandType == TEXT("delete_light"))
+    {
+        return FEpicUnrealMCPEnvironmentCommands::HandleDeleteLight(Params);
     }
 
     return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown blueprint command: %s"), *CommandType));
@@ -3739,6 +3761,197 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetMaterialFuncti
     
     ResultObj->SetArrayField(TEXT("expressions"), ExpressionsArray);
     ResultObj->SetNumberField(TEXT("expression_count"), ExpressionsArray.Num());
+    
+    // Build connection map for expressions
+    TMap<UMaterialExpression*, FString> ExprToNodeId;
+    for (UMaterialExpression* Expr : Expressions)
+    {
+        if (Expr)
+        {
+            FString TypeName = Expr->GetClass()->GetName();
+            TypeName.ReplaceInline(TEXT("MaterialExpression"), TEXT(""));
+            FString NodeId = FString::Printf(TEXT("Expr_%s_%d"), *TypeName, Expr->GetUniqueID());
+            ExprToNodeId.Add(Expr, NodeId);
+        }
+    }
+    
+    // Get all connections between expressions
+    TArray<TSharedPtr<FJsonValue>> ConnectionsArray;
+    
+    for (UMaterialExpression* Expr : Expressions)
+    {
+        if (!Expr) continue;
+        
+        FString SourceNodeId = ExprToNodeId[Expr];
+        
+        // Get inputs by iterating through GetInput
+        int32 InputIndex = 0;
+        FExpressionInput* Input = Expr->GetInput(InputIndex);
+        while (Input)
+        {
+            if (Input->Expression)
+            {
+                FString* TargetNodeId = ExprToNodeId.Find(Input->Expression);
+                if (TargetNodeId)
+                {
+                    TSharedPtr<FJsonObject> ConnObj = MakeShared<FJsonObject>();
+                    ConnObj->SetStringField(TEXT("from"), *TargetNodeId);
+                    ConnObj->SetStringField(TEXT("to"), SourceNodeId);
+                    ConnObj->SetStringField(TEXT("from_output"), FString::Printf(TEXT("Output_%d"), Input->OutputIndex));
+                    ConnObj->SetStringField(TEXT("to_input"), FString::Printf(TEXT("Input_%d"), InputIndex));
+                    
+                    ConnectionsArray.Add(MakeShared<FJsonValueObject>(ConnObj));
+                }
+            }
+            InputIndex++;
+            Input = Expr->GetInput(InputIndex);
+        }
+        
+        // Handle specific expression types with named inputs
+        auto AddConnection = [&](UMaterialExpression* SourceExpr, const FString& OutputName, const FString& InputName)
+        {
+            if (SourceExpr)
+            {
+                FString* FromNodeId = ExprToNodeId.Find(SourceExpr);
+                if (FromNodeId)
+                {
+                    TSharedPtr<FJsonObject> ConnObj = MakeShared<FJsonObject>();
+                    ConnObj->SetStringField(TEXT("from"), *FromNodeId);
+                    ConnObj->SetStringField(TEXT("to"), SourceNodeId);
+                    ConnObj->SetStringField(TEXT("from_output"), OutputName);
+                    ConnObj->SetStringField(TEXT("to_input"), InputName);
+                    
+                    ConnectionsArray.Add(MakeShared<FJsonValueObject>(ConnObj));
+                }
+            }
+        };
+        
+        // Handle common expression types
+        if (UMaterialExpressionMultiply* Multiply = Cast<UMaterialExpressionMultiply>(Expr))
+        {
+            if (Multiply->A.Expression) AddConnection(Multiply->A.Expression, FString::Printf(TEXT("Output_%d"), Multiply->A.OutputIndex), TEXT("A"));
+            if (Multiply->B.Expression) AddConnection(Multiply->B.Expression, FString::Printf(TEXT("Output_%d"), Multiply->B.OutputIndex), TEXT("B"));
+        }
+        else if (UMaterialExpressionAdd* Add = Cast<UMaterialExpressionAdd>(Expr))
+        {
+            if (Add->A.Expression) AddConnection(Add->A.Expression, FString::Printf(TEXT("Output_%d"), Add->A.OutputIndex), TEXT("A"));
+            if (Add->B.Expression) AddConnection(Add->B.Expression, FString::Printf(TEXT("Output_%d"), Add->B.OutputIndex), TEXT("B"));
+        }
+        else if (UMaterialExpressionSubtract* Sub = Cast<UMaterialExpressionSubtract>(Expr))
+        {
+            if (Sub->A.Expression) AddConnection(Sub->A.Expression, FString::Printf(TEXT("Output_%d"), Sub->A.OutputIndex), TEXT("A"));
+            if (Sub->B.Expression) AddConnection(Sub->B.Expression, FString::Printf(TEXT("Output_%d"), Sub->B.OutputIndex), TEXT("B"));
+        }
+        else if (UMaterialExpressionDivide* Div = Cast<UMaterialExpressionDivide>(Expr))
+        {
+            if (Div->A.Expression) AddConnection(Div->A.Expression, FString::Printf(TEXT("Output_%d"), Div->A.OutputIndex), TEXT("A"));
+            if (Div->B.Expression) AddConnection(Div->B.Expression, FString::Printf(TEXT("Output_%d"), Div->B.OutputIndex), TEXT("B"));
+        }
+        else if (UMaterialExpressionLinearInterpolate* Lerp = Cast<UMaterialExpressionLinearInterpolate>(Expr))
+        {
+            if (Lerp->A.Expression) AddConnection(Lerp->A.Expression, FString::Printf(TEXT("Output_%d"), Lerp->A.OutputIndex), TEXT("A"));
+            if (Lerp->B.Expression) AddConnection(Lerp->B.Expression, FString::Printf(TEXT("Output_%d"), Lerp->B.OutputIndex), TEXT("B"));
+            if (Lerp->Alpha.Expression) AddConnection(Lerp->Alpha.Expression, FString::Printf(TEXT("Output_%d"), Lerp->Alpha.OutputIndex), TEXT("Alpha"));
+        }
+        else if (UMaterialExpressionTextureSample* TexSample = Cast<UMaterialExpressionTextureSample>(Expr))
+        {
+            if (TexSample->Coordinates.Expression) AddConnection(TexSample->Coordinates.Expression, FString::Printf(TEXT("Output_%d"), TexSample->Coordinates.OutputIndex), TEXT("Coordinates"));
+        }
+        else if (UMaterialExpressionFunctionOutput* FuncOutput = Cast<UMaterialExpressionFunctionOutput>(Expr))
+        {
+            if (FuncOutput->A.Expression) AddConnection(FuncOutput->A.Expression, FString::Printf(TEXT("Output_%d"), FuncOutput->A.OutputIndex), TEXT("Input"));
+        }
+        else if (UMaterialExpressionComponentMask* Mask = Cast<UMaterialExpressionComponentMask>(Expr))
+        {
+            if (Mask->Input.Expression) AddConnection(Mask->Input.Expression, FString::Printf(TEXT("Output_%d"), Mask->Input.OutputIndex), TEXT("Input"));
+        }
+        else if (UMaterialExpressionOneMinus* OneMinus = Cast<UMaterialExpressionOneMinus>(Expr))
+        {
+            if (OneMinus->Input.Expression) AddConnection(OneMinus->Input.Expression, FString::Printf(TEXT("Output_%d"), OneMinus->Input.OutputIndex), TEXT("Input"));
+        }
+        else if (UMaterialExpressionSaturate* Saturate = Cast<UMaterialExpressionSaturate>(Expr))
+        {
+            if (Saturate->Input.Expression) AddConnection(Saturate->Input.Expression, FString::Printf(TEXT("Output_%d"), Saturate->Input.OutputIndex), TEXT("Input"));
+        }
+        else if (UMaterialExpressionAbs* AbsExpr = Cast<UMaterialExpressionAbs>(Expr))
+        {
+            if (AbsExpr->Input.Expression) AddConnection(AbsExpr->Input.Expression, FString::Printf(TEXT("Output_%d"), AbsExpr->Input.OutputIndex), TEXT("Input"));
+        }
+        else if (UMaterialExpressionCeil* Ceil = Cast<UMaterialExpressionCeil>(Expr))
+        {
+            if (Ceil->Input.Expression) AddConnection(Ceil->Input.Expression, FString::Printf(TEXT("Output_%d"), Ceil->Input.OutputIndex), TEXT("Input"));
+        }
+        else if (UMaterialExpressionFloor* Floor = Cast<UMaterialExpressionFloor>(Expr))
+        {
+            if (Floor->Input.Expression) AddConnection(Floor->Input.Expression, FString::Printf(TEXT("Output_%d"), Floor->Input.OutputIndex), TEXT("Input"));
+        }
+        else if (UMaterialExpressionFrac* Frac = Cast<UMaterialExpressionFrac>(Expr))
+        {
+            if (Frac->Input.Expression) AddConnection(Frac->Input.Expression, FString::Printf(TEXT("Output_%d"), Frac->Input.OutputIndex), TEXT("Input"));
+        }
+        else if (UMaterialExpressionSine* Sine = Cast<UMaterialExpressionSine>(Expr))
+        {
+            if (Sine->Input.Expression) AddConnection(Sine->Input.Expression, FString::Printf(TEXT("Output_%d"), Sine->Input.OutputIndex), TEXT("Input"));
+        }
+        else if (UMaterialExpressionCosine* Cosine = Cast<UMaterialExpressionCosine>(Expr))
+        {
+            if (Cosine->Input.Expression) AddConnection(Cosine->Input.Expression, FString::Printf(TEXT("Output_%d"), Cosine->Input.OutputIndex), TEXT("Input"));
+        }
+        else if (UMaterialExpressionPower* Power = Cast<UMaterialExpressionPower>(Expr))
+        {
+            if (Power->Base.Expression) AddConnection(Power->Base.Expression, FString::Printf(TEXT("Output_%d"), Power->Base.OutputIndex), TEXT("Base"));
+            if (Power->Exponent.Expression) AddConnection(Power->Exponent.Expression, FString::Printf(TEXT("Output_%d"), Power->Exponent.OutputIndex), TEXT("Exponent"));
+        }
+        else if (UMaterialExpressionDotProduct* DotProd = Cast<UMaterialExpressionDotProduct>(Expr))
+        {
+            if (DotProd->A.Expression) AddConnection(DotProd->A.Expression, FString::Printf(TEXT("Output_%d"), DotProd->A.OutputIndex), TEXT("A"));
+            if (DotProd->B.Expression) AddConnection(DotProd->B.Expression, FString::Printf(TEXT("Output_%d"), DotProd->B.OutputIndex), TEXT("B"));
+        }
+        else if (UMaterialExpressionCrossProduct* CrossProd = Cast<UMaterialExpressionCrossProduct>(Expr))
+        {
+            if (CrossProd->A.Expression) AddConnection(CrossProd->A.Expression, FString::Printf(TEXT("Output_%d"), CrossProd->A.OutputIndex), TEXT("A"));
+            if (CrossProd->B.Expression) AddConnection(CrossProd->B.Expression, FString::Printf(TEXT("Output_%d"), CrossProd->B.OutputIndex), TEXT("B"));
+        }
+        else if (UMaterialExpressionNormalize* Normalize = Cast<UMaterialExpressionNormalize>(Expr))
+        {
+            if (Normalize->VectorInput.Expression) AddConnection(Normalize->VectorInput.Expression, FString::Printf(TEXT("Output_%d"), Normalize->VectorInput.OutputIndex), TEXT("VectorInput"));
+        }
+        else if (UMaterialExpressionAppendVector* Append = Cast<UMaterialExpressionAppendVector>(Expr))
+        {
+            if (Append->A.Expression) AddConnection(Append->A.Expression, FString::Printf(TEXT("Output_%d"), Append->A.OutputIndex), TEXT("A"));
+            if (Append->B.Expression) AddConnection(Append->B.Expression, FString::Printf(TEXT("Output_%d"), Append->B.OutputIndex), TEXT("B"));
+        }
+        else if (UMaterialExpressionPanner* Panner = Cast<UMaterialExpressionPanner>(Expr))
+        {
+            if (Panner->Coordinate.Expression) AddConnection(Panner->Coordinate.Expression, FString::Printf(TEXT("Output_%d"), Panner->Coordinate.OutputIndex), TEXT("Coordinate"));
+            if (Panner->Time.Expression) AddConnection(Panner->Time.Expression, FString::Printf(TEXT("Output_%d"), Panner->Time.OutputIndex), TEXT("Time"));
+        }
+        else if (UMaterialExpressionRotator* Rotator = Cast<UMaterialExpressionRotator>(Expr))
+        {
+            if (Rotator->Coordinate.Expression) AddConnection(Rotator->Coordinate.Expression, FString::Printf(TEXT("Output_%d"), Rotator->Coordinate.OutputIndex), TEXT("Coordinate"));
+            if (Rotator->Time.Expression) AddConnection(Rotator->Time.Expression, FString::Printf(TEXT("Output_%d"), Rotator->Time.OutputIndex), TEXT("Time"));
+        }
+        else if (UMaterialExpressionDesaturation* Desat = Cast<UMaterialExpressionDesaturation>(Expr))
+        {
+            if (Desat->Input.Expression) AddConnection(Desat->Input.Expression, FString::Printf(TEXT("Output_%d"), Desat->Input.OutputIndex), TEXT("Input"));
+            if (Desat->Fraction.Expression) AddConnection(Desat->Fraction.Expression, FString::Printf(TEXT("Output_%d"), Desat->Fraction.OutputIndex), TEXT("Fraction"));
+        }
+        else if (UMaterialExpressionMaterialFunctionCall* FuncCall = Cast<UMaterialExpressionMaterialFunctionCall>(Expr))
+        {
+            for (int32 FuncInputIdx = 0; FuncInputIdx < FuncCall->FunctionInputs.Num(); FuncInputIdx++)
+            {
+                const FFunctionExpressionInput& FuncInput = FuncCall->FunctionInputs[FuncInputIdx];
+                if (FuncInput.Input.Expression)
+                {
+                    FString InputName = FuncInput.ExpressionInput ? FuncInput.ExpressionInput->InputName.ToString() : FString::Printf(TEXT("Input_%d"), FuncInputIdx);
+                    AddConnection(FuncInput.Input.Expression, FString::Printf(TEXT("Output_%d"), FuncInput.Input.OutputIndex), InputName);
+                }
+            }
+        }
+    }
+    
+    ResultObj->SetArrayField(TEXT("connections"), ConnectionsArray);
+    ResultObj->SetNumberField(TEXT("connection_count"), ConnectionsArray.Num());
     ResultObj->SetBoolField(TEXT("success"), true);
 
     return ResultObj;

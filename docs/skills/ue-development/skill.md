@@ -9,6 +9,7 @@ This skill provides comprehensive guides for UE development workflows, including
 ## Capabilities
 
 - Create and modify UE materials via MCP
+- **Analyze existing UE materials** (properties, nodes, connections)
 - Build procedural environments and structures
 - Import assets (textures, FBX meshes)
 - Work with Material Functions and blueprints
@@ -21,6 +22,7 @@ This skill provides comprehensive guides for UE development workflows, including
 | `tools-reference.md` | Complete reference for all UE MCP tools |
 | `blueprint-graph-guide.md` | Guide for creating blueprint-style visualizations |
 | `colored-shapes-tutorial.md` | Tutorial for creating colored shapes and primitives |
+| `material-analysis.md` | Workflow for analyzing existing UE materials |
 
 ## Prerequisites
 
@@ -40,6 +42,10 @@ This skill provides comprehensive guides for UE development workflows, including
 - `add_material_expression` - Add nodes to material graph
 - `connect_material_nodes` - Connect material nodes
 - `compile_material` - Compile and update materials
+- `get_available_materials` - List materials in project
+- `get_material_properties` - Get material attributes
+- `get_material_expressions` - List all nodes in material
+- `get_material_connections` - Get node connection relationships
 
 ### Textures
 - `import_texture` - Import texture files
@@ -52,7 +58,16 @@ This skill provides comprehensive guides for UE development workflows, including
 ### Material Functions
 - `create_material_function` - Create new material functions
 - `get_material_functions` - List available functions
-- `get_material_function_content` - Get function details
+- `get_material_function_content` - Get function details with internal node connections
+
+### Lights
+- `create_light` - Create lights (point, directional, spot, rect)
+- `set_light_properties` - Modify existing lights
+- `get_lights` - List all lights in level
+- `delete_light` - Remove lights
+
+### Viewport
+- `get_viewport_screenshot` - Capture viewport to image file
 
 ## Quick Start
 

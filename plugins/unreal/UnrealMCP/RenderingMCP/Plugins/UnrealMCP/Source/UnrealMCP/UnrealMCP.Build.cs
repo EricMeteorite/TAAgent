@@ -61,7 +61,9 @@ public class UnrealMCP : ModuleRules
 				"AssetRegistry",
 				"MeshDescription",       // For FMeshDescription
 				"StaticMeshDescription", // For FStaticMeshAttributes
-				"Landscape"              // For UMaterialExpressionLandscapeLayerBlend
+				"Landscape",             // For UMaterialExpressionLandscapeLayerBlend
+				"ImageWrapper",          // For image encoding (PNG/JPEG)
+				"LevelEditor"            // For editor viewport access
 			}
 		);
 		

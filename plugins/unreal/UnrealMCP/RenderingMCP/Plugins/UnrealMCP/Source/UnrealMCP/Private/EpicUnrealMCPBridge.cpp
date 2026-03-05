@@ -261,7 +261,12 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                     CommandType == TEXT("get_material_properties") ||
                     CommandType == TEXT("get_material_connections") ||
                     CommandType == TEXT("import_texture") ||
-                    CommandType == TEXT("set_static_mesh_asset_properties"))
+                    CommandType == TEXT("set_static_mesh_asset_properties") ||
+                    CommandType == TEXT("get_viewport_screenshot") ||
+                    CommandType == TEXT("create_light") ||
+                    CommandType == TEXT("set_light_properties") ||
+                    CommandType == TEXT("get_lights") ||
+                    CommandType == TEXT("delete_light"))
             {
                 ResultJson = BlueprintCommands->HandleCommand(CommandType, Params);
             }
