@@ -1030,7 +1030,8 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetEmitterDetails(FNiagar
     if (ShouldInclude(IncludeSections, TEXT("renderers")) || ShouldInclude(IncludeSections, TEXT("all")))
     {
         TArray<TSharedPtr<FJsonValue>> RenderersJson;
-        for (UNiagaraRendererProperties* Renderer : EmitterData->RendererProperties)
+        const TArray<UNiagaraRendererProperties*>& Renderers = EmitterData->GetRenderers();
+        for (UNiagaraRendererProperties* Renderer : Renderers)
         {
             if (Renderer)
             {

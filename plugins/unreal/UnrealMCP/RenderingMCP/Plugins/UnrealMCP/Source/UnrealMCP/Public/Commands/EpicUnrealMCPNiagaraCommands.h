@@ -12,6 +12,10 @@ class UNiagaraRendererProperties;
 class UNiagaraSimulationStageBase;
 class UNiagaraComponent;
 
+// Forward declarations for Niagara types
+struct FNiagaraEmitterHandle;
+struct FVersionedNiagaraEmitterData;
+
 /**
  * Handler class for Niagara-related MCP commands
  * Handles spawning, controlling, and analyzing Niagara particle systems
@@ -37,7 +41,7 @@ private:
     
     // Helper functions for asset analysis
     TSharedPtr<FJsonObject> GetNiagaraSystemOverview(UNiagaraSystem* System);
-    TSharedPtr<FJsonObject> GetEmitterDetails(class FNiagaraEmitterHandle& Handle, UNiagaraSystem* System, 
+    TSharedPtr<FJsonObject> GetEmitterDetails(FNiagaraEmitterHandle& Handle, UNiagaraSystem* System, 
         const TArray<FString>& IncludeSections);
     TSharedPtr<FJsonObject> GetScriptDetails(UNiagaraScript* Script);
     TSharedPtr<FJsonObject> GetRendererDetails(UNiagaraRendererProperties* Renderer);
