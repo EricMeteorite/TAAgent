@@ -267,41 +267,6 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleCommand(const FSt
     {
         return FEpicUnrealMCPEnvironmentCommands::HandleGetActorProperties(Params);
     }
-    // Legacy compatibility - these are deprecated but kept for backward compatibility
-PRAGMA_DISABLE_DEPRECATION_WARNINGS
-    else if (CommandType == TEXT("create_light"))
-    {
-        return FEpicUnrealMCPEnvironmentCommands::HandleCreateLight(Params);
-    }
-    else if (CommandType == TEXT("set_light_properties"))
-    {
-        return FEpicUnrealMCPEnvironmentCommands::HandleSetLightProperties(Params);
-    }
-    else if (CommandType == TEXT("get_lights"))
-    {
-        return FEpicUnrealMCPEnvironmentCommands::HandleGetLights(Params);
-    }
-    else if (CommandType == TEXT("delete_light"))
-    {
-        return FEpicUnrealMCPEnvironmentCommands::HandleDeleteLight(Params);
-    }
-    else if (CommandType == TEXT("create_post_process_volume"))
-    {
-        return FEpicUnrealMCPEnvironmentCommands::HandleCreatePostProcessVolume(Params);
-    }
-    else if (CommandType == TEXT("set_post_process_settings"))
-    {
-        return FEpicUnrealMCPEnvironmentCommands::HandleSetPostProcessSettings(Params);
-    }
-    else if (CommandType == TEXT("spawn_basic_actor"))
-    {
-        return FEpicUnrealMCPEnvironmentCommands::HandleSpawnBasicActor(Params);
-    }
-    else if (CommandType == TEXT("set_actor_material"))
-    {
-        return FEpicUnrealMCPEnvironmentCommands::HandleSetActorMaterial(Params);
-    }
-PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
     return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown blueprint command: %s"), *CommandType));
 }
