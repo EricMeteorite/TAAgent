@@ -1,99 +1,67 @@
 ---
-description: 
+description: Rendering MCP 项目核心指导原则
 alwaysApply: true
 enabled: true
-updatedAt: 2026-03-04T16:53:27.063Z
-provider: 
 ---
 
-# Rendering MCP Skills
+# Rendering MCP 核心指导
 
-This rule provides quick reference for all skills in the Rendering MCP project.
+## 触发指南
 
-## Available Skills
+| 用户意图 | 文档位置 |
+|----------|----------|
+| RenderDoc mesh 导出 | `docs/skills/renderdoc-fbx-export/workflow.md` |
+| 材质分析/重建 | `docs/skills/renderdoc-material-reconstruction/` |
+| 材质验证环境 | `docs/skills/lookdev/skill.md` |
+| Shadertoy 转换 | `docs/skills/shadertoy-conversion/` |
+| UE API 参考 | `docs/knowledge/ue-api/ue5.7-api-notes.md` |
+| MCP 工具文档 | `docs/tools/unreal-mcp-tools.md` |
 
-### 1. Project Setup (`docs/skills/project-setup/`)
-- **Purpose**: Setup and maintenance guide for the Rendering MCP project
-- **Key Files**: `update-and-build.md`, `renderdoc-mcp-update.md`
-- **Quick Reference**:
-  - UE 编译：**不要自动启动 UE 编辑器**，让用户手动编译
-  - MCP 路径: `src/servers/unreal_render_mcp/` 和 `src/servers/renderdoc_mcp/`
-  - 配置文件: `config/mcp_config.example.json`
+---
 
-### 2. RenderDoc FBX Export (`docs/skills/renderdoc-fbx-export/`)
-- **Purpose**: Export meshes from RenderDoc captures to FBX
-- **Key Files**: `workflow.md`, `ue-integration.md`
-- **Critical Rules**:
-  - POSITION/NORMAL/TANGENT 使用 `vs_input` (模型空间)，不用 `vs_output` (世界空间)
-  - UE→FBX 需要设置 `flip_winding_order=True` 解决法线反向问题
-  - GPU-Driven 渲染需要 `buffer_config` 参数
+## 核心原则
 
-### 3. UE Development (`docs/skills/ue-development/`)
-- **Purpose**: UE development workflows via MCP
-- **Key Files**: `tools-reference.md`, `blueprint-graph-guide.md`, `material-functions/`, `material-analysis.md`
-- **Tool Categories**:
-  - Materials: `create_material`, `add_material_expression`, `connect_material_nodes`, `compile_material`
-  - **Material Analysis**: `get_available_materials`, `get_material_properties`, `get_material_expressions`, `get_material_connections`
-  - Textures: `import_texture`, `set_texture_properties`
-  - Meshes: `import_fbx`, `create_static_mesh_from_data`
-  - **Lights**: `create_light`, `set_light_properties`, `get_lights`, `delete_light`
-  - **Viewport**: `get_viewport_screenshot`
-  - Niagara: `spawn_niagara_system`, `set_niagara_*_parameter`
+### 跨版本开发
+API 会变化，通过查阅文档而非记忆来处理版本差异。
 
-### 4. RenderDoc Material Reconstruction (`docs/skills/renderdoc-material-reconstruction/`)
-- **Purpose**: Reconstruct materials from RenderDoc captures
-- **Key Files**: `workflow.md`, `dxbc-analysis.md`, `texture-identification.md`
+### UE 模块依赖
+UE 功能可能分散在多个模块中。编译错误时，搜索引擎目录找到正确的头文件位置，然后添加对应模块依赖和包含路径。Internal API 通常需要手动添加包含路径。
 
-### 5. Shadertoy Conversion (`docs/skills/shadertoy-conversion/`)
-- **Purpose**: Convert Shadertoy shaders to UE materials
-- **Key Files**: `guide.md`
+### UE 编译错误处理流程
 
-### 6. Lookdev (`docs/skills/lookdev/`)
-- **Purpose**: Asset review environment setup for consistent material validation
-- **Key Files**: `skill.md`
-- **Core Concepts**:
-  - EV100=0 曝光基准
-  - 灰板测光：Linear 0.18 (sRGB 119)
-  - 三种光比环境：低(1.65x)、中(2.6x)、高(16x)
-  - 中性光源：6500K
-- **MCP Tools**: `create_light`, `set_light_properties`, `get_lights`, `get_viewport_screenshot`
+当遇到 UE 编译错误时，按以下优先级处理：
 
-## Common Issues & Solutions
+1. **头文件找不到** → 搜索引擎目录定位头文件位置
+   - 添加对应模块到 `Build.cs` 的 `PublicDependencyModuleNames`
+   - Internal API 需要手动添加 `PublicIncludePaths`
 
-| Issue | Skill | Solution |
-|-------|-------|----------|
-| UE 编译失败 | project-setup | 使用 Visual Studio 或手动启动 UE 编译 |
-| MCP 连接失败 | project-setup | 检查配置路径是否为 `src/servers/...` |
-| FBX 法线反向 | fbx-export | 设置 `flip_winding_order=True` |
-| FBX 比例错误 | fbx-export | 调整 `unit_scale` 参数 |
-| 光照问题 | fbx-export | 使用 `vs_input` 而非 `vs_output` |
-| 链接错误 | project-setup | 检查 Build.cs 是否添加了必要模块依赖 |
-| 材质节点不完整 | ue-development | 使用 `get_material_connections` 获取连接关系 |
-| 材质函数未展开 | ue-development | 单独调用 `get_material_function_content` |
-| 资产曝光不准 | lookdev | 使用灰板测光，确保 EV100=0 |
-| 材质对比度过大 | lookdev | 检查光比设置，增加环境光 |
-| DCC预览不一致 | lookdev | 匹配 HDRI 和 Tonemapping 设置 |
+2. **API 方法不存在** → 搜索 UE 源码找替代实现
+   - 常见变化：方法重命名、参数变化、返回类型变化
+   - 通过搜索同类用法确认正确的调用方式
 
-## File Locations
+3. **迭代修复** → 命令行编译 → 分析错误 → 修复 → 重复
+   - 使用 `Build.bat` 或 `Rebuild.bat` 进行命令行编译
+   - 每次修复后重新编译，直到所有错误解决
+
+**核心思路**：不依赖记忆，通过搜索和查阅源码解决版本差异问题。
+
+### MCP 工具设计
+
+**通用优先于特定**：一个通用工具胜过多个特定工具。使用 `spawn_actor(actor_class)` 而非 `spawn_light()`, `spawn_mesh()`。
+
+**反射驱动**：通过 UE 反射系统处理任意类型，避免为每种类型编写特定代码。属性名匹配 UPROPERTY，不匹配则静默忽略。
+
+**原子操作**：一次调用完成完整操作，避免多次往返。使用 `build_material_graph()` 而非多次 `add_node()` + `connect()`。
+
+**批量处理**：当需要操作多个对象时，使用 batch 工具减少往返开销。
+
+---
+
+## 项目结构
 
 ```
 d:\CodeBuddy\rendering-mcp\
-├── config/mcp_config.example.json    # MCP 配置
-├── src/servers/                       # MCP 服务器
-│   ├── renderdoc_mcp/
-│   └── unreal_render_mcp/
-├── plugins/unreal/UnrealMCP/         # UE 插件源码
-└── docs/skills/                       # Skill 文档
+├── src/servers/          # Python MCP Server (FastMCP 协议层)
+├── plugins/unreal/       # UE C++ Bridge (TCP 通信 + 反射调用)
+└── docs/                 # 文档
 ```
-
-## UE5.7 API Notes
-
-- `TVertexInstanceAttributesRef` (不是 `TVertiveDataAttributesRef`)
-- `FPolygonGroupArray` 使用 `GetFirstValidID()` 而非 `[0]`
-- `BuildFromMeshDescriptions()` 需要数组参数
-- `EngineUtils.h` 包含 `TActorIterator`
-- `ULightComponent` 有 `SetIntensity/SetLightColor`，`ULightComponentBase` 没有
-- `bAffectsWorld` 是属性，直接赋值而非 setter 方法
-- `IImageWrapper::GetCompressed(Quality)` 质量参数直接传入
-- `IAssetViewport::GetSharedActiveViewport()` 返回 `TSharedPtr<FSceneViewport>`
-- `#include "Misc/Base64.h"` (不是 `HAL/Base64.h`)
