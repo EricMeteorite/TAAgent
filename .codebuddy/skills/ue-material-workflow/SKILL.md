@@ -1,13 +1,6 @@
 ---
 name: ue-material-workflow
-description: |
-  Unreal Engine 材质系统的分析与制作工作流。
-  
-  触发场景：
-  - 用户想要创建或修改 UE 材质
-  - 用户想要分析现有材质的结构
-  - 用户想要生成材质变体
-  - 用户想要理解材质函数的用法
+description: This skill should be used when working with Unreal Engine material systems, including creating or modifying materials, analyzing existing material graphs, generating material instances, or understanding material function usage. Trigger when the user needs to build material graphs, set up PBR parameters, or create material variants.
 ---
 
 # UE 材质分析与制作
@@ -19,6 +12,15 @@ description: |
 - 材质图构建与修改
 - 材质实例管理
 - 材质函数应用
+
+## 参考文档
+
+以下参考文档按需加载：
+
+| 文件 | 用途 | 加载时机 |
+|------|------|----------|
+| `references/node-types.md` | 所有材质节点类型、属性、连接方式 | 构建材质图时需要了解节点参数 |
+| `references/material-functions.md` | 内置材质函数路径、用法、自定义函数 | 使用或创建材质函数时 |
 
 ## 核心工作流
 

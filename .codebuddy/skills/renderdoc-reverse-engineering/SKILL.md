@@ -1,13 +1,6 @@
 ---
 name: renderdoc-reverse-engineering
-description: |
-  从 RenderDoc GPU 捕获中逆向分析并重建渲染资产。
-  
-  触发场景：
-  - 用户想要分析游戏/应用的渲染技术
-  - 用户想要从捕获中提取模型、纹理或着色器
-  - 用户想要在 UE 中复现某个渲染效果
-  - 用户问"这个效果是怎么实现的"
+description: This skill should be used when analyzing GPU captures from RenderDoc, including reverse engineering rendering techniques, extracting meshes/textures/shaders, or recreating effects in Unreal Engine. Trigger when the user asks about rendering implementation, wants to extract assets from a capture, or needs to understand how a visual effect works.
 ---
 
 # RenderDoc 逆向工程
@@ -20,6 +13,15 @@ description: |
 - 网格提取与导出
 - 纹理提取与分析
 - 材质重建
+
+## 参考文档
+
+以下参考文档按需加载：
+
+| 文件 | 用途 | 加载时机 |
+|------|------|----------|
+| `references/mcp-tools-reference.md` | RenderDoc MCP 工具完整 API 参考 | 需要了解具体工具参数和用法时 |
+| `references/vertex-formats.md` | 各引擎顶点格式、编码解码、坐标系统 | 导出网格时需要确定属性映射 |
 
 ## 核心工作流
 
