@@ -267,8 +267,14 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
             {
                 ResultJson = MaterialCommands->HandleCommand(CommandType, Params);
             }
-            // Environment Commands (Generic Actor Management - 5 Core Tools)
+            // Environment Commands (Generic Actor Management - 5 Core Tools + Viewport + Level)
             else if (CommandType == TEXT("get_viewport_screenshot") ||
+                     CommandType == TEXT("set_viewport_camera") ||
+                     CommandType == TEXT("get_viewport_camera") ||
+                     CommandType == TEXT("create_level") ||
+                     CommandType == TEXT("load_level") ||
+                     CommandType == TEXT("save_current_level") ||
+                     CommandType == TEXT("get_current_level") ||
                      CommandType == TEXT("spawn_actor") ||
                      CommandType == TEXT("delete_actor") ||
                      CommandType == TEXT("get_actors") ||
