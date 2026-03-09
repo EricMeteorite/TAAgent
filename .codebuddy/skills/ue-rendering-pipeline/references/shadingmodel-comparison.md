@@ -273,15 +273,34 @@ half InScatter = pow(saturate(dot(L, -V)), 12) * lerp(3, 0.1, Opacity);
 | 间接光照 | BaseColor | BaseColor | **BaseColor + SubsurfaceColor** |
 | Opacity 影响 | - | 无 | ✅ 散射强度 |
 
-### 5.2 半透明 PerVertex 模式
+### 5.2 半透明 PerVertex / Volumetric Directional 模式
+
+**关键发现：只有 TwoSidedFoliage 会计算背面间接光照！**
+
+```hlsl
+// ShadingCommon.ush:91-94
+bool GetShadingModelRequiresBackfaceLighting(uint ShadingModelID)
+{
+    return ShadingModelID == SHADINGMODELID_TWOSIDED_FOLIAGE;  // 只有 TwoSidedFoliage！
+}
+```
+
+**间接光照计算（BasePassPixelShader.usf:1345）：**
+```hlsl
+DiffuseColor += (DiffuseIndirectLighting * DiffuseColorForIndirect 
+              + SubsurfaceIndirectLighting * SubsurfaceColor)  // 背面贡献
+              * AOMultiBounce(...);
+```
 
 | 特性 | DefaultLit | TwoSidedFoliage | Subsurface |
 |------|-----------|-----------------|------------|
 | Diffuse | BaseColor | BaseColor | BaseColor |
 | Transmission | ❌ | ❌ | ❌ |
 | Specular | ❌ | ❌ | ❌ |
-| Opacity 影响 | 无 | 无 | 无 |
-| **表现差异** | **相同** | **相同** | **相同** |
+| 背面间接光照 | ❌ | **✅ SubsurfaceIndirectLighting** | ❌ |
+| **表现差异** | **相同** | **更亮** | **相同** |
+
+**结论：TwoSidedFoliage 在Volumetric 模式下会比其他 ShadingModel 更亮，因为它额外计算了背面间接光照。**
 
 ### 5.3 半透明 Surface 模式
 
@@ -310,10 +329,10 @@ Opacity: 无影响，可不设置
 
 **性能优先（大量粒子）：**
 ```
-Shading Model: DefaultLit（与 TwoSidedFoliage 表现相同）
+Shading Model: DefaultLit 或 Subsurface（表现相同）
 Lighting Mode: Volumetric PerVertex Directional
 BaseColor: 雾的颜色
-// 无背光透射效果
+// 注意：TwoSidedFoliage 会额外计算背面间接光照，表现会不同
 ```
 
 ### 6.2 半透明物体（蜡、玉石）
@@ -347,17 +366,30 @@ Lighting Mode: Volumetric PerVertex Directional
 
 ## 7. 常见问题
 
-### Q1: 为什么 PerVertex 模式下 DefaultLit 和 TwoSidedFoliage 表现相同？
+### Q1: 为什么Volumetric Directional 模式下 TwoSidedFoliage 表现不同？
 
-**A:** PerVertex 模式只计算 `DiffuseColor * VolumeLighting`，不调用 BxDF 函数，因此 Transmission 不会被计算。两者的 DiffuseColor 计算方式相同。
+**A:** TwoSidedFoliage 是**唯一**会计算背面间接光照的 ShadingModel：
+
+```hlsl
+// ShadingCommon.ush:91-94
+bool GetShadingModelRequiresBackfaceLighting(uint ShadingModelID)
+{
+    return ShadingModelID == SHADINGMODELID_TWOSIDED_FOLIAGE;  // 只有 TwoSidedFoliage！
+}
+```
+
+这导致 TwoSidedFoliage 会额外获得 `SubsurfaceIndirectLighting * SubsurfaceColor` 的贡献，比 DefaultLit 和 Subsurface 更亮。
 
 ### Q2: TwoSidedFoliage 的 Opacity 为什么不影响表现？
 
 **A:** 源码中 Opacity 被存储到 `GBuffer.CustomData.a`，但在 `TwoSidedBxDF` 中从未被读取。这是一个设计遗留问题。
 
-### Q3: 如何在 PerVertex 模式下实现背光透射？
+### Q3: 如何在Volumetric 模式下获得一致的背光效果？
 
-**A:** 无法实现。必须使用 Surface LightingVolume 或 Surface ForwardShading 模式。或者通过材质 Emissive 手动模拟。
+**A:** Volumetric 模式不计算 Transmission。解决方案：
+- **方案1**: 使用 Surface LightingVolume 模式（有 Transmission）
+- **方案2**: 使用材质 Emissive 手动模拟背光
+- **方案3**: 使用 TwoSidedFoliage + Volumetric Directional（有背面间接光照，但不是真正的Transmission）
 
 ### Q4: Subsurface 的间接光照为什么更亮？
 
