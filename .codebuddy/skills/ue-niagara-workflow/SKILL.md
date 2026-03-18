@@ -17,14 +17,47 @@ description: This skill should be used when working with Unreal Engine Niagara p
 
 以下参考文档按需加载：
 
+### 核心文档
+
 | 文件 | 用途 | 加载时机 |
 |------|------|----------|
 | `references/engine-modules.md` | UE5.7 引擎 Niagara 模块完整列表 (270+) | 需要查找模块路径时 |
 | `references/common-modules.md` | 常用模块详解 (参数、属性、实现原理) | 需要了解模块参数、编写模块配置时 |
 | `references/niagara-architecture.md` | 底层架构原理 (CPU/GPU模式、VectorVM、ParameterMap) | 需要深入理解底层实现或排查复杂问题时 |
-| `references/fluid-systems-analysis.md` | Niagara Fluids 系统分析 (属性数据流、模块参数、美术效果) | 分析或创建流体效果时 |
-| `references/fluid-module-details.md` | 流体模块详细实现 (每个模块的HLSL代码、数学推导、数据流图) | 深入理解模块内部实现时 |
-| `references/grid2d-datainterface.md` | Grid2D DataInterface 实现原理 (数据结构、GPU存储、HLSL接口) | 深入理解 Grid2D 底层实现时 |
+
+### Data Interface 文档
+
+| 文件 | 用途 | 加载时机 |
+|------|------|----------|
+| `references/data-interfaces.md` | Data Interface 完整分类与实现原理 | 需要使用外部数据源或自定义 DI 时 |
+| `references/data-interfaces-deep-dive.md` | 核心 DataInterface 源码级分析 (C++/HLSL) | 需要深入理解 DI 底层实现时 |
+| `references/data-interfaces-grid.md` | Grid DataInterface (Grid3DCollection, RasterizationGrid3D) | 3D 体积网格模拟 |
+| `references/data-interfaces-rendertarget.md` | RenderTarget DataInterface (2D/Cube/Volume) | GPU 纹理读写 |
+| `references/data-interfaces-noise-occlusion.md` | Noise & Occlusion DataInterface | 程序化噪声和可见性查询 |
+| `references/data-interfaces-material-volume.md` | Material & Volume DataInterface | 材质控制和体积纹理 |
+| `references/data-interfaces-misc.md` | 其他 DataInterface (MeshRendererInfo, CubeTexture) | 渲染器信息和纹理数组 |
+
+### 流体模拟文档
+
+| 文件 | 用途 | 加载时机 |
+|------|------|----------|
+| `references/fluid-simulation.md` | 流体模拟原理与 Niagara 实现 | 创建流体效果时 |
+| `references/fluid-systems-analysis.md` | Niagara Fluids 系统分析 | 分析现有效果时 |
+| `references/fluid-module-details.md` | 流体模块详细实现 (HLSL、数学推导) | 深入理解模块内部实现时 |
+
+### 高级功能文档
+
+| 文件 | 用途 | 加载时机 |
+|------|------|----------|
+| `references/data-channels.md` | Data Channels 跨系统通信 (Global, Islands, GameplayBurst) | 需要跨系统数据交换时 |
+| `references/simulation-stages.md` | Simulation Stages 多次迭代处理 (流体、约束求解) | 需要复杂迭代模拟时 |
+
+### 物理模拟参考
+
+| 文件 | 用途 | 加载时机 |
+|------|------|----------|
+| `references/niagara-groom-analysis.md` | Niagara Hair Strands 深度分析 (XPBD、Cosserat Rod、约束求解) | 开发物理模拟 DI、理解约束求解算法时 |
+| `references/fracture-export-workflow.md` | 破碎特效导出流程 (Houdini → UE) | 创建破碎效果 DataInterface 时 |
 
 ---
 
