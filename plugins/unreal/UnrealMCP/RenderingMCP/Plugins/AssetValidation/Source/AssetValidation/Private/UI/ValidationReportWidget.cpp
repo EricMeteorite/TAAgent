@@ -415,9 +415,16 @@ TSharedPtr<FSlateDynamicImageBrush> SValidationReportWidget::LoadScreenshotBrush
 		return nullptr;
 	}
 
-	// Create image wrapper
+	// Create image wrapper - detect format from file extension
 	IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(FName("ImageWrapper"));
-	TSharedPtr<IImageWrapper> ImageWrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
+	
+	EImageFormat ImageFormat = EImageFormat::PNG;
+	if (ImagePath.EndsWith(TEXT(".jpg")) || ImagePath.EndsWith(TEXT(".jpeg")))
+	{
+		ImageFormat = EImageFormat::JPEG;
+	}
+	
+	TSharedPtr<IImageWrapper> ImageWrapper = ImageWrapperModule.CreateImageWrapper(ImageFormat);
 
 	if (!ImageWrapper.IsValid() || !ImageWrapper->SetCompressed(FileData.GetData(), FileData.Num()))
 	{

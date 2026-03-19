@@ -237,6 +237,26 @@ struct FAssetValidationResult
 	int32 CPUEmitterCount = 0;
 
 	// ============================================
+	// Emitter Loop Mode
+	// ============================================
+
+	/** Number of burst emitters (oneshot, non-looping) */
+	UPROPERTY(BlueprintReadOnly, Category = "Validation")
+	int32 BurstEmitterCount = 0;
+
+	/** Number of looping emitters */
+	UPROPERTY(BlueprintReadOnly, Category = "Validation")
+	int32 LoopingEmitterCount = 0;
+
+	/** Estimated duration for burst system in seconds (0 for looping) */
+	UPROPERTY(BlueprintReadOnly, Category = "Validation")
+	float EstimatedBurstDuration = 0.0f;
+
+	/** Whether the system is purely burst (oneshot) */
+	UPROPERTY(BlueprintReadOnly, Category = "Validation")
+	bool bIsBurstSystem = false;
+
+	// ============================================
 	// Memory Stats
 	// ============================================
 	

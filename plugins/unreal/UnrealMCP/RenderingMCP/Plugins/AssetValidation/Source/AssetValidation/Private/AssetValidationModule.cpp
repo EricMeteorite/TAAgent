@@ -57,7 +57,7 @@ void FAssetValidationModule::RegisterToolMenus()
 							const float DurationSeconds = 3.0f;
 							const float CaptureInterval = 0.2f;
 							const int32 TotalFrames = FMath::CeilToInt(DurationSeconds / CaptureInterval);
-							const int32 TotalSteps = 5 + TotalFrames; // 5 static steps + capture frames
+							const int32 TotalSteps = 3 + TotalFrames; // 3 setup steps + capture frames
 							
 							// Create slow task with progress dialog
 							FScopedSlowTask SlowTask(TotalSteps, LOCTEXT("ValidatingSystem", "Validating Niagara System..."), true);
@@ -76,12 +76,9 @@ void FAssetValidationModule::RegisterToolMenus()
 							// Step 2: Prepare for dynamic analysis
 							SlowTask.EnterProgressFrame(1, LOCTEXT("PreparingDynamic", "Preparing dynamic analysis..."));
 							
-							// Step 3: Spawn system and calculate camera
-							SlowTask.EnterProgressFrame(1, LOCTEXT("SpawningSystem", "Spawning Niagara system..."));
-							
-							// Step 4: Configure overdraw analysis
-							SlowTask.EnterProgressFrame(1, LOCTEXT("ConfiguringCamera", "Configuring camera position..."));
-							
+							// Step 3: Configure overdraw analysis
+							SlowTask.EnterProgressFrame(1, LOCTEXT("ConfiguringAnalysis", "Configuring overdraw analysis..."));
+
 							// Run dynamic overdraw analysis
 							FNiagaraOverdrawAnalyzer::FAnalysisConfig Config;
 							Config.DurationSeconds = DurationSeconds;
@@ -89,29 +86,27 @@ void FAssetValidationModule::RegisterToolMenus()
 							Config.MaxOverdrawThreshold = 10;
 							Config.bSaveScreenshots = true;
 
-							FNiagaraOverdrawAnalyzer::FAnalysisResult OverdrawResult;
-							
-							// Step 5: Capture frames with progress
-							for (int32 FrameIdx = 0; FrameIdx < TotalFrames; FrameIdx++)
+							// Set up progress callback
+							Config.ProgressCallback = [&SlowTask, TotalFrames](int32 CurrentFrame, int32 TotalFramesParam, int32 CurrentOverdraw)
 							{
 								if (SlowTask.ShouldCancel())
 								{
-									break;
+									return;
 								}
 								
-								float Progress = (float)FrameIdx / TotalFrames;
 								FFormatNamedArguments Args;
-								Args.Add(TEXT("Current"), FrameIdx + 1);
+								Args.Add(TEXT("Current"), CurrentFrame);
 								Args.Add(TEXT("Total"), TotalFrames);
-								Args.Add(TEXT("Progress"), FText::AsPercent(Progress));
+								Args.Add(TEXT("Overdraw"), CurrentOverdraw);
 								
 								SlowTask.EnterProgressFrame(1, 
-									FText::Format(LOCTEXT("CapturingFrame", "Capturing frame {Current}/{Total} ({Progress})..."), Args));
-							}
+									FText::Format(LOCTEXT("CapturingFrame", "Capturing frame {Current}/{Total} - Overdraw: {Overdraw}"), Args));
+							};
+
+							FNiagaraOverdrawAnalyzer::FAnalysisResult OverdrawResult;
 							
 							if (!SlowTask.ShouldCancel())
 							{
-								// Actually run the analysis (we showed progress UI, now do the work)
 								OverdrawResult = FNiagaraOverdrawAnalyzer::AnalyzeOverdraw(System, Config);
 							}
 							

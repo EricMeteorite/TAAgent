@@ -43,6 +43,9 @@ public:
 		
 		/** Whether to save screenshots */
 		bool bSaveScreenshots = true;
+
+		/** Progress callback: void(int32 CurrentFrame, int32 TotalFrames, int32 CurrentOverdraw) */
+		TFunction<void(int32, int32, int32)> ProgressCallback;
 	};
 
 	/** Result of a single frame capture */
@@ -123,6 +126,6 @@ private:
 	/** Analyze pixel data to find max overdraw value */
 	static int32 AnalyzeOverdrawFromPixels(const TArray<FColor>& Pixels, int32 Width, int32 Height);
 
-	/** Save pixel data as PNG */
-	static bool SavePixelsAsPNG(const TArray<FColor>& Pixels, int32 Width, int32 Height, const FString& Path);
+	/** Save pixel data as JPG (no alpha channel) */
+	static bool SavePixelsAsJPG(const TArray<FColor>& Pixels, int32 Width, int32 Height, const FString& Path);
 };

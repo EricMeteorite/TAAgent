@@ -108,6 +108,26 @@ FAssetValidationResult UNiagaraSystemValidator::ValidateSystem(UNiagaraSystem* S
 			Result.CPUEmitterCount++;
 		}
 
+		// Detect Burst vs Loop mode
+		// Check if emitter has a finite lifecycle (burst) or infinite looping
+		bool bIsLooping = true;
+		
+		// Check system settings for loop behavior
+		if (System)
+		{
+			bIsLooping = System->IsLooping();
+		}
+
+		// Track burst vs looping emitters
+		if (bIsLooping)
+		{
+			Result.LoopingEmitterCount++;
+		}
+		else
+		{
+			Result.BurstEmitterCount++;
+		}
+
 		// Get max particle estimate
 		int32 MaxParticles = EmitterData->GetMaxParticleCountEstimate();
 		Result.EstimatedMaxParticles += MaxParticles;
@@ -273,6 +293,36 @@ FAssetValidationResult UNiagaraSystemValidator::ValidateSystem(UNiagaraSystem* S
 			EAssetCheckSeverity::Warning,
 			TEXT("Emitters"));
 
+		// Determine if system is burst or looping
+		Result.bIsBurstSystem = (Result.BurstEmitterCount > 0 && Result.LoopingEmitterCount == 0);
+		
+		// Add system type check
+		FString SystemType;
+		if (Result.bIsBurstSystem)
+		{
+			SystemType = TEXT("Burst (One-shot)");
+		}
+		else if (Result.BurstEmitterCount == 0 && Result.LoopingEmitterCount > 0)
+		{
+			SystemType = TEXT("Looping");
+		}
+		else if (Result.BurstEmitterCount > 0 && Result.LoopingEmitterCount > 0)
+		{
+			SystemType = TEXT("Mixed");
+		}
+		else
+		{
+			SystemType = TEXT("Unknown");
+		}
+		
+		AddCheck(Result.Checks,
+			TEXT("System Type"),
+			TEXT("-"),
+			SystemType,
+			true,
+			EAssetCheckSeverity::Info,
+			TEXT("Emitters"));
+
 		if (DisabledEmitterCount > 0)
 		{
 			AddCheck(Result.Checks, 
@@ -310,43 +360,11 @@ FAssetValidationResult UNiagaraSystemValidator::ValidateSystem(UNiagaraSystem* S
 	// --- Renderer Checks ---
 	{
 		AddCheck(Result.Checks, 
-			TEXT("Total Renderers"), 
-			TEXT("-"),
-			FormatNumber(TotalEnabledRenderers),
-			true,
-			EAssetCheckSeverity::Info,
-			TEXT("Renderers"));
-
-		AddCheck(Result.Checks, 
-			TEXT("Sprite Renderers"), 
-			TEXT("-"),
-			FormatNumber(SpriteRendererCount),
-			true,
-			EAssetCheckSeverity::Info,
-			TEXT("Renderers"));
-
-		AddCheck(Result.Checks, 
-			TEXT("Mesh Renderers"), 
-			FString::Printf(TEXT("≤ %d"), Config->MaxMeshRenderers),
-			FormatNumber(MeshRendererCount),
-			MeshRendererCount <= Config->MaxMeshRenderers,
-			EAssetCheckSeverity::Warning,
-			TEXT("Renderers"));
-
-		AddCheck(Result.Checks, 
-			TEXT("Ribbon Renderers"), 
-			TEXT("-"),
-			FormatNumber(RibbonRendererCount),
-			true,
-			EAssetCheckSeverity::Info,
-			TEXT("Renderers"));
-
-		AddCheck(Result.Checks, 
 			TEXT("Light Renderers"), 
-			TEXT("-"),
+			TEXT("≤ 1"),
 			FormatNumber(LightRendererCount),
-			true,
-			EAssetCheckSeverity::Info,
+			LightRendererCount <= 1,
+			EAssetCheckSeverity::Warning,
 			TEXT("Renderers"));
 	}
 

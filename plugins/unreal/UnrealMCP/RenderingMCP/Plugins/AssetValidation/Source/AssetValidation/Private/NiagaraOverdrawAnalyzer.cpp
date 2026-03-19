@@ -198,10 +198,16 @@ FNiagaraOverdrawAnalyzer::FAnalysisResult FNiagaraOverdrawAnalyzer::AnalyzeOverd
 		ViewportClient->Invalidate();
 		FlushRenderingCommands();
 
-		// Capture and analyze
-		FString ScreenshotPath = FPaths::Combine(*OutputDir, FString::Printf(TEXT("frame_%04d.png"), FrameIndex));
+		// Capture and analyze - use JPG to avoid alpha channel issues
+		FString ScreenshotPath = FPaths::Combine(*OutputDir, FString::Printf(TEXT("frame_%04d.jpg"), FrameIndex));
 		FViewport* CaptureViewport = TargetViewport ? static_cast<FViewport*>(TargetViewport) : ViewportClient->Viewport;
 		int32 FrameMaxOverdraw = CaptureAndAnalyzeOverdraw(CaptureViewport, ScreenshotPath, Config.bSaveScreenshots);
+
+		// Call progress callback if provided
+		if (Config.ProgressCallback)
+		{
+			Config.ProgressCallback(FrameIndex + 1, TotalFrames, FrameMaxOverdraw);
+		}
 
 		// Record frame result
 		FFrameResult FrameResult;
@@ -369,7 +375,7 @@ int32 FNiagaraOverdrawAnalyzer::CaptureAndAnalyzeOverdraw(FViewport* Viewport, c
 	// Save screenshot if requested
 	if (bSaveScreenshot)
 	{
-		SavePixelsAsPNG(PixelData, ViewportSize.X, ViewportSize.Y, OutputPath);
+		SavePixelsAsJPG(PixelData, ViewportSize.X, ViewportSize.Y, OutputPath);
 	}
 
 	return MaxOverdraw;
@@ -440,7 +446,7 @@ int32 FNiagaraOverdrawAnalyzer::AnalyzeOverdrawFromPixels(const TArray<FColor>& 
 	return MaxOverdraw;
 }
 
-bool FNiagaraOverdrawAnalyzer::SavePixelsAsPNG(const TArray<FColor>& Pixels, int32 Width, int32 Height, const FString& Path)
+bool FNiagaraOverdrawAnalyzer::SavePixelsAsJPG(const TArray<FColor>& Pixels, int32 Width, int32 Height, const FString& Path)
 {
 	if (Pixels.Num() == 0 || Width <= 0 || Height <= 0)
 	{
@@ -448,13 +454,14 @@ bool FNiagaraOverdrawAnalyzer::SavePixelsAsPNG(const TArray<FColor>& Pixels, int
 	}
 
 	IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(FName("ImageWrapper"));
-	TSharedPtr<IImageWrapper> ImageWrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
+	TSharedPtr<IImageWrapper> ImageWrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::JPEG);
 
 	if (!ImageWrapper.IsValid())
 	{
 		return false;
 	}
 
+	// Use RGB format (no alpha) for JPEG
 	ImageWrapper->SetRaw(Pixels.GetData(), Pixels.Num() * sizeof(FColor), Width, Height, ERGBFormat::BGRA, 8);
 	TArray64<uint8> CompressedData = ImageWrapper->GetCompressed();
 
