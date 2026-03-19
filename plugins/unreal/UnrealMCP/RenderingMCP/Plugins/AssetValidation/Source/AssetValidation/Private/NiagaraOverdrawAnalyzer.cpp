@@ -60,6 +60,9 @@ FNiagaraOverdrawAnalyzer::FAnalysisResult FNiagaraOverdrawAnalyzer::AnalyzeOverd
 		return Result;
 	}
 
+	// Array to track hidden actors (for restoration)
+	TArray<AActor*> HiddenActors;
+
 	// Spawn Niagara actor
 	AActor* SpawnedActor = SpawnNiagaraActor(System, World);
 	if (!SpawnedActor)
@@ -109,6 +112,17 @@ FNiagaraOverdrawAnalyzer::FAnalysisResult FNiagaraOverdrawAnalyzer::AnalyzeOverd
 	Result.CameraLocation = CameraLocation;
 	Result.CameraRotation = CameraRotation;
 
+	// Hide all other actors in the world so only the Niagara system is visible
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		AActor* Actor = *It;
+		if (Actor && Actor != SpawnedActor)
+		{
+			Actor->SetActorHiddenInGame(true);
+			HiddenActors.Add(Actor);
+		}
+	}
+
 	// Get viewport client using GEditor->GetLevelViewportClients()
 	FViewport* TargetViewport = nullptr;
 	FEditorViewportClient* ViewportClient = nullptr;
@@ -144,6 +158,14 @@ FNiagaraOverdrawAnalyzer::FAnalysisResult FNiagaraOverdrawAnalyzer::AnalyzeOverd
 
 	if (!ViewportClient)
 	{
+		// Restore hidden actors
+		for (AActor* Actor : HiddenActors)
+		{
+			if (Actor)
+			{
+				Actor->SetActorHiddenInGame(false);
+			}
+		}
 		SpawnedActor->Destroy();
 		Result.ErrorMessage = TEXT("No active viewport found");
 		return Result;
@@ -165,6 +187,14 @@ FNiagaraOverdrawAnalyzer::FAnalysisResult FNiagaraOverdrawAnalyzer::AnalyzeOverd
 	// Switch to Quad Overdraw view mode
 	if (!SetQuadOverdrawViewMode(ViewportClient, true))
 	{
+		// Restore hidden actors
+		for (AActor* Actor : HiddenActors)
+		{
+			if (Actor)
+			{
+				Actor->SetActorHiddenInGame(false);
+			}
+		}
 		SpawnedActor->Destroy();
 		Result.ErrorMessage = TEXT("Failed to set Quad Overdraw view mode. Make sure the project is built with DebugViewModes enabled.");
 		return Result;
@@ -246,6 +276,15 @@ FNiagaraOverdrawAnalyzer::FAnalysisResult FNiagaraOverdrawAnalyzer::AnalyzeOverd
 	ViewportClient->FOVAngle = OriginalFOV;
 	ViewportClient->ViewFOV = OriginalFOV;
 	ViewportClient->Invalidate();
+
+	// Restore hidden actors
+	for (AActor* Actor : HiddenActors)
+	{
+		if (Actor)
+		{
+			Actor->SetActorHiddenInGame(false);
+		}
+	}
 
 	// Clean up
 	SpawnedActor->Destroy();
