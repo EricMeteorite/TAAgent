@@ -1,40 +1,59 @@
 #!/usr/bin/env python3
-"""
-简单的 UE 测试脚本
-测试 UE 的 Python Script Plugin 是否可用
-"""
+"""Simple manual checks for Unreal Editor and Python commandlet support."""
 
-import subprocess
+from __future__ import annotations
+
 import os
+import subprocess
 import sys
 import tempfile
-import time
-
-UE_PATH = r"E:\UE\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe"
-PROJECT_PATH = r"d:\CodeBuddy\rendering-mcp\plugins\unreal\UnrealMCP\RenderingMCP\RenderingMCP.uproject"
+from pathlib import Path
 
 
-def test_ue_commandlet():
-    """测试 UE Commandlet 模式"""
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_PROJECT = REPO_ROOT / "plugins" / "unreal" / "UnrealMCP" / "RenderingMCP" / "RenderingMCP.uproject"
+
+
+def _resolve_ue_path() -> str:
+    configured_path = os.environ.get("UE_EDITOR_PATH")
+    if configured_path:
+        return configured_path
+
+    for candidate in (
+        r"C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe",
+        r"C:\Program Files\Epic Games\UE_5.6\Engine\Binaries\Win64\UnrealEditor.exe",
+        r"C:\Program Files\Epic Games\UE_5.5\Engine\Binaries\Win64\UnrealEditor.exe",
+        r"C:\Program Files\Epic Games\UE_5.4\Engine\Binaries\Win64\UnrealEditor.exe",
+    ):
+        if Path(candidate).exists():
+            return candidate
+
+    return "UnrealEditor.exe"
+
+
+UE_PATH = _resolve_ue_path()
+PROJECT_PATH = os.environ.get("TAAGENT_UE_UPROJECT", str(DEFAULT_PROJECT))
+
+
+def test_ue_commandlet() -> None:
+    """Test UE commandlet mode."""
     print("=" * 60)
-    print("测试 UE Commandlet 模式")
+    print("Testing UE commandlet mode")
     print("=" * 60)
-    
-    # 创建测试脚本
-    script = '''
-import unreal
+
+    script = """
 import sys
+import unreal
 
 print("UE Python Test")
 print(f"Version: {unreal.SystemLibrary.get_engine_version()}")
 sys.exit(0)
-'''
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
-        f.write(script)
-        script_path = f.name
-    
-    # 使用 commandlet 模式
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as handle:
+        handle.write(script)
+        script_path = handle.name
+
     cmd = [
         UE_PATH,
         PROJECT_PATH,
@@ -43,94 +62,87 @@ sys.exit(0)
         "-unattended",
         "-nopause",
         "-NullRHI",
-        "-log"
+        "-log",
     ]
-    
-    print(f"命令: {' '.join(cmd)}")
+
+    print(f"Command: {' '.join(cmd)}")
     print("-" * 60)
-    
+
     try:
-        # 在后台运行,设置超时
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            encoding='utf-8',
-            errors='replace'
+            encoding="utf-8",
+            errors="replace",
         )
-        
-        # 等待完成或超时
+
         try:
             stdout, _ = proc.communicate(timeout=60)
             print(stdout)
-            print(f"返回码: {proc.returncode}")
+            print(f"Exit code: {proc.returncode}")
         except subprocess.TimeoutExpired:
             proc.kill()
-            print("超时,进程已终止")
-            
-    except Exception as e:
-        print(f"错误: {e}")
+            print("Timed out; process was terminated")
+    except Exception as exc:
+        print(f"Error: {exc}")
     finally:
         os.unlink(script_path)
 
 
-def check_ue_exists():
-    """检查 UE 和项目是否存在"""
-    print("检查 UE 路径...")
+def check_ue_exists() -> bool:
+    """Check whether the editor and test project exist."""
+    print("Checking UE path...")
     if os.path.exists(UE_PATH):
-        print(f"  ✓ UE 存在: {UE_PATH}")
+        print(f"  OK: UE exists: {UE_PATH}")
     else:
-        print(f"  ✗ UE 不存在: {UE_PATH}")
+        print(f"  ERROR: UE not found: {UE_PATH}")
         return False
-    
-    print("检查项目路径...")
+
+    print("Checking project path...")
     if os.path.exists(PROJECT_PATH):
-        print(f"  ✓ 项目存在: {PROJECT_PATH}")
+        print(f"  OK: project exists: {PROJECT_PATH}")
     else:
-        print(f"  ✗ 项目不存在: {PROJECT_PATH}")
+        print(f"  ERROR: project not found: {PROJECT_PATH}")
         return False
-    
+
     return True
 
 
-def test_ue_version():
-    """测试 UE 版本信息"""
+def test_ue_version() -> None:
+    """Query UE version information."""
     print("\n" + "=" * 60)
-    print("获取 UE 版本信息")
+    print("Getting UE version information")
     print("=" * 60)
-    
-    # 使用 UE 的版本查询
+
     cmd = [UE_PATH, "-version"]
-    
+
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=10,
-            encoding='utf-8',
-            errors='replace'
+            encoding="utf-8",
+            errors="replace",
         )
         print(result.stdout)
         if result.stderr:
             print("STDERR:", result.stderr)
     except subprocess.TimeoutExpired:
-        print("超时")
-    except Exception as e:
-        print(f"错误: {e}")
+        print("Timed out")
+    except Exception as exc:
+        print(f"Error: {exc}")
 
 
 if __name__ == "__main__":
-    print("UE 测试脚本")
+    print("UE test script")
     print("=" * 60)
-    
+
     if not check_ue_exists():
         sys.exit(1)
-    
+
     test_ue_version()
-    
-    # 测试 commandlet
-    # test_ue_commandlet()  # 这个可能会启动很长时间
-    
-    print("\n完成!")
+    # test_ue_commandlet()  # Enable manually when needed.
+    print("\nDone")

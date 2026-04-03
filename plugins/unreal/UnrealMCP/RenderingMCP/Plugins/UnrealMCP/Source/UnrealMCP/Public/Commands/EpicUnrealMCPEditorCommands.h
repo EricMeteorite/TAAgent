@@ -16,6 +16,16 @@ public:
     TSharedPtr<FJsonObject> HandleCommand(const FString& CommandType, const TSharedPtr<FJsonObject>& Params);
 
 private:
+    // Editor context and asset editor commands
+    TSharedPtr<FJsonObject> HandleGetEditorContext(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleGetOpenAssetEditors(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleGetSelectedAssets(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleGetSelectedActors(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleOpenAsset(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleFocusAssetEditor(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleCloseAssetEditors(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleSaveAsset(const TSharedPtr<FJsonObject>& Params);
+
     // Actor manipulation commands
     TSharedPtr<FJsonObject> HandleGetActorsInLevel(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleFindActorsByName(const TSharedPtr<FJsonObject>& Params);
@@ -73,4 +83,4 @@ private:
 
     /** Get all properties from UObject as JSON */
     static TSharedPtr<FJsonObject> GetAllUObjectPropertiesAsJson(UObject* Object);
-}; 
+};

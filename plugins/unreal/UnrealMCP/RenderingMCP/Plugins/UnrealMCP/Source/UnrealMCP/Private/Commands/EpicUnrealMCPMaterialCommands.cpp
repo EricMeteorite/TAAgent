@@ -89,10 +89,11 @@
 #include "Factories/TextureFactory.h"
 #include "EditorAssetLibrary.h"
 #include "AssetRegistry/AssetRegistryModule.h"
-#include "AssetToolsModule.h"
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
 #include "HAL/PlatformFileManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "UObject/Package.h"
 
 FEpicUnrealMCPMaterialCommands::FEpicUnrealMCPMaterialCommands()
@@ -500,42 +501,129 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPMaterialCommands::HandleImportTexture(cons
         UE_LOG(LogTemp, Log, TEXT("Deleted existing texture: %s"), *AssetPath);
     }
 
-    // Import the texture using AssetTools
-    UTexture2D* ImportedTexture = nullptr;
-
-    IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
-    TArray<UObject*> ImportedAssets = AssetTools.ImportAssets(TArray<FString>{SourceFilePath}, DestinationPath);
-
-    if (ImportedAssets.Num() > 0)
+    // Import the texture using UTextureFactory directly instead of AssetTools/Interchange.
+    // This avoids task graph re-entrancy assertions when the import is triggered from the
+    // editor tick while Niagara baker/editor UI is active.
+    TArray64<uint8> FileData;
+    if (!FFileHelper::LoadFileToArray(FileData, *SourceFilePath))
     {
-        ImportedTexture = Cast<UTexture2D>(ImportedAssets[0]);
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to read source file: %s"), *SourceFilePath));
     }
+
+    UPackage* Package = CreatePackage(*AssetPath);
+    if (!Package)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to create package for texture: %s"), *AssetPath));
+    }
+
+    Package->FullyLoad();
+
+    UTextureFactory* TextureFactory = NewObject<UTextureFactory>();
+    if (!TextureFactory)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to create texture factory"));
+    }
+
+    const FString FileExtension = FPaths::GetExtension(SourceFilePath, false);
+    const uint8* BufferStart = FileData.GetData();
+    const uint8* BufferEnd = BufferStart + FileData.Num();
+
+    UTexture2D* ImportedTexture = Cast<UTexture2D>(
+        TextureFactory->FactoryCreateBinary(
+            UTexture2D::StaticClass(),
+            Package,
+            FName(*TextureName),
+            RF_Public | RF_Standalone,
+            nullptr,
+            *FileExtension,
+            BufferStart,
+            BufferEnd,
+            GWarn));
 
     if (!ImportedTexture)
     {
         return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to import texture from: %s"), *SourceFilePath));
     }
 
-    // Rename if needed
-    if (ImportedTexture->GetName() != TextureName)
+    bool bSRGB = false;
+    if (Params->TryGetBoolField(TEXT("srgb"), bSRGB))
     {
-        FString PackagePath = FPaths::GetPath(ImportedTexture->GetOutermost()->GetName());
-        TArray<FAssetRenameData> RenameData;
-        RenameData.Add(FAssetRenameData(ImportedTexture, PackagePath, TextureName));
-        AssetTools.RenameAssets(RenameData);
+        ImportedTexture->SRGB = bSRGB;
     }
 
-    // Get the final asset path
-    FString FinalAssetPath;
-    if (ImportedTexture)
+    FString CompressionSettings;
+    if (Params->TryGetStringField(TEXT("compression_settings"), CompressionSettings))
     {
-        FinalAssetPath = ImportedTexture->GetPathName();
-        int32 DotIndex;
-        if (FinalAssetPath.FindChar('.', DotIndex))
-        {
-            FinalAssetPath = FinalAssetPath.Left(DotIndex);
-        }
+        if (CompressionSettings == TEXT("Default"))
+            ImportedTexture->CompressionSettings = TextureCompressionSettings::TC_Default;
+        else if (CompressionSettings == TEXT("TC_Normalmap") || CompressionSettings == TEXT("Normalmap") || CompressionSettings == TEXT("TC_NormalMap"))
+            ImportedTexture->CompressionSettings = TextureCompressionSettings::TC_Normalmap;
+        else if (CompressionSettings == TEXT("TC_Grayscale") || CompressionSettings == TEXT("Grayscale"))
+            ImportedTexture->CompressionSettings = TextureCompressionSettings::TC_Grayscale;
+        else if (CompressionSettings == TEXT("TC_Masks") || CompressionSettings == TEXT("Masks"))
+            ImportedTexture->CompressionSettings = TextureCompressionSettings::TC_Masks;
+        else if (CompressionSettings == TEXT("TC_HDR") || CompressionSettings == TEXT("HDR"))
+            ImportedTexture->CompressionSettings = TextureCompressionSettings::TC_HDR;
+        else if (CompressionSettings == TEXT("TC_EditorIcon") || CompressionSettings == TEXT("EditorIcon"))
+            ImportedTexture->CompressionSettings = TextureCompressionSettings::TC_EditorIcon;
+        else if (CompressionSettings == TEXT("TC_VectorDisplacementmap") || CompressionSettings == TEXT("VectorDisplacementmap"))
+            ImportedTexture->CompressionSettings = TextureCompressionSettings::TC_VectorDisplacementmap;
+        else if (CompressionSettings == TEXT("TC_Alpha") || CompressionSettings == TEXT("Alpha"))
+            ImportedTexture->CompressionSettings = TextureCompressionSettings::TC_Alpha;
+        else if (CompressionSettings == TEXT("TC_DistanceFieldFont") || CompressionSettings == TEXT("DistanceFieldFont"))
+            ImportedTexture->CompressionSettings = TextureCompressionSettings::TC_DistanceFieldFont;
+        else if (CompressionSettings == TEXT("TC_HDR_Compressed") || CompressionSettings == TEXT("HDR_Compressed"))
+            ImportedTexture->CompressionSettings = TextureCompressionSettings::TC_HDR_Compressed;
+        else if (CompressionSettings == TEXT("TC_BC7") || CompressionSettings == TEXT("BC7"))
+            ImportedTexture->CompressionSettings = TextureCompressionSettings::TC_BC7;
     }
+
+    FString Filter;
+    if (Params->TryGetStringField(TEXT("filter"), Filter))
+    {
+        if (Filter == TEXT("Nearest"))
+            ImportedTexture->Filter = TextureFilter::TF_Nearest;
+        else if (Filter == TEXT("Bilinear"))
+            ImportedTexture->Filter = TextureFilter::TF_Bilinear;
+        else if (Filter == TEXT("Trilinear"))
+            ImportedTexture->Filter = TextureFilter::TF_Trilinear;
+        else
+            ImportedTexture->Filter = TextureFilter::TF_Default;
+    }
+
+    auto ParseAddressMode = [](const FString& Value) -> TextureAddress
+    {
+        if (Value == TEXT("Clamp"))
+            return TextureAddress::TA_Clamp;
+        else if (Value == TEXT("Mirror"))
+            return TextureAddress::TA_Mirror;
+
+        return TextureAddress::TA_Wrap;
+    };
+
+    FString AddressX;
+    if (Params->TryGetStringField(TEXT("address_x"), AddressX))
+    {
+        ImportedTexture->AddressX = ParseAddressMode(AddressX);
+    }
+
+    FString AddressY;
+    if (Params->TryGetStringField(TEXT("address_y"), AddressY))
+    {
+        ImportedTexture->AddressY = ParseAddressMode(AddressY);
+    }
+
+    FAssetRegistryModule::AssetCreated(ImportedTexture);
+    ImportedTexture->MarkPackageDirty();
+    ImportedTexture->UpdateResource();
+    ImportedTexture->PostEditChange();
+
+    if (!UEditorAssetLibrary::SaveLoadedAsset(ImportedTexture, false))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Texture imported but failed to save asset: %s"), *AssetPath));
+    }
+
+    FString FinalAssetPath = AssetPath;
 
     // Delete source file if requested
     if (bDeleteSource)

@@ -1,6 +1,6 @@
 # UE5 半透明光照系统源码分析
 
-> 基于 UE5.7 源码，源码位置：`E:\UE\UE_5.7\Engine\Source\Runtime\Renderer\Private\`
+> 基于 UE5.7 源码，源码位置示例：`<UE_SOURCE_ROOT>/Engine/Source/Runtime/Renderer/Private/`
 
 ---
 

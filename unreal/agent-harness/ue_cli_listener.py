@@ -7,7 +7,8 @@ via file-based communication.
 To use:
 1. Open Unreal Editor
 2. Open Python Console (Window -> Developer Tools -> Python Console)
-3. Run: exec(open(r"D:/CodeBuddy/rendering-mcp/unreal/agent-harness/ue_cli_listener.py").read())
+3. Run this file from your local TAAgent checkout, for example:
+   exec(open(r"D:/ABSOLUTE/PATH/TO/TAAgent/unreal/agent-harness/ue_cli_listener.py").read())
 4. Or copy-paste this script into the console
 
 The listener will poll for command files and execute them.
@@ -19,7 +20,9 @@ import os
 from pathlib import Path
 
 # Configuration
-TEMP_DIR = Path(os.environ.get("TEMP", "/tmp")) / "ue_cli"
+TEMP_DIR = Path(
+    os.environ.get("UE_CLI_TEMP_DIR", str(Path(os.environ.get("TEMP", "/tmp")) / "ue_cli"))
+)
 COMMAND_FILE = TEMP_DIR / "command.json"
 RESULT_FILE = TEMP_DIR / "result.json"
 

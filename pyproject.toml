@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "mcp>=1.0.0",
+    "fastmcp>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -22,3 +23,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["agent*", "mcps*", "src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = [".git", ".venv", ".taagent-local", "ta_agent_workspace.egg-info"]
+addopts = "-ra"

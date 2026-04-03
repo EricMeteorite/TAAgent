@@ -224,7 +224,15 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                 ResultJson->SetStringField(TEXT("message"), TEXT("pong"));
             }
             // Editor Commands (including actor manipulation and asset management)
-            else if (CommandType == TEXT("get_actors_in_level") || 
+            else if (CommandType == TEXT("get_editor_context") ||
+                     CommandType == TEXT("get_open_asset_editors") ||
+                     CommandType == TEXT("get_selected_assets") ||
+                     CommandType == TEXT("get_selected_actors") ||
+                     CommandType == TEXT("open_asset") ||
+                     CommandType == TEXT("focus_asset_editor") ||
+                     CommandType == TEXT("close_asset_editors") ||
+                     CommandType == TEXT("save_asset") ||
+                     CommandType == TEXT("get_actors_in_level") ||
                      CommandType == TEXT("find_actors_by_name") ||
                      CommandType == TEXT("set_actor_transform") ||
                      CommandType == TEXT("spawn_blueprint_actor") ||
@@ -305,7 +313,10 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
             else if (CommandType == TEXT("get_niagara_graph") ||
                      CommandType == TEXT("update_niagara_graph") ||
                      CommandType == TEXT("get_niagara_emitter") ||
-                     CommandType == TEXT("update_niagara_emitter"))
+                     CommandType == TEXT("update_niagara_emitter") ||
+                     CommandType == TEXT("get_niagara_compiled_code") ||
+                     CommandType == TEXT("get_niagara_particle_attributes") ||
+                     CommandType == TEXT("bake_niagara_system"))
             {
                 ResultJson = NiagaraCommands->HandleCommand(CommandType, Params);
             }

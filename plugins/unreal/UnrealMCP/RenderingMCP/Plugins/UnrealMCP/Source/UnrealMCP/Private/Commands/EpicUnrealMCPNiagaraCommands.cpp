@@ -2,6 +2,8 @@
 
 #include "Commands/EpicUnrealMCPNiagaraCommands.h"
 #include "NiagaraSystem.h"
+#include "NiagaraBakerSettings.h"
+#include "NiagaraBakerOutputTexture2D.h"
 #include "NiagaraEmitter.h"
 #include "NiagaraEmitterHandle.h"
 #include "NiagaraScript.h"
@@ -10,14 +12,35 @@
 #include "NiagaraTypes.h"
 #include "NiagaraParameterStore.h"
 #include "NiagaraEditorUtilities.h"
+#include "NiagaraWorldManager.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/SavePackage.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "Components/SceneCaptureComponent2D.h"
+#include "Components/PrimitiveComponent.h"
+#include "HAL/FileManager.h"
+#include "Misc/PackageName.h"
+#include "Misc/Paths.h"
+#include "Misc/FileHelper.h"
+#include "Modules/ModuleManager.h"
+#include "AdvancedPreviewScene.h"
+#include "IImageWrapper.h"
+#include "IImageWrapperModule.h"
+#include "ImageWrapperHelper.h"
+#include "RenderCore.h"
 
-// UE 5.7 Stateless Niagara support
-#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7)
+// UE 5.7+ Stateless Niagara support. Guard on header presence as well because
+// some source branches expose unexpected version macros while lacking these headers.
+#if (ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7)) && \
+    __has_include("Stateless/NiagaraStatelessEmitter.h") && \
+    __has_include("Stateless/NiagaraStatelessModule.h") && \
+    __has_include("Stateless/NiagaraStatelessEmitterTemplate.h")
+#define TAAGENT_WITH_NIAGARA_STATELESS 1
 #include "Stateless/NiagaraStatelessEmitter.h"
 #include "Stateless/NiagaraStatelessModule.h"
 #include "Stateless/NiagaraStatelessEmitterTemplate.h"
+#else
+#define TAAGENT_WITH_NIAGARA_STATELESS 0
 #endif
 
 // Standard Niagara Graph support
@@ -41,6 +64,393 @@
 
 FEpicUnrealMCPNiagaraCommands::FEpicUnrealMCPNiagaraCommands()
 {
+}
+
+namespace
+{
+struct FScopedBakerSettingsRestore
+{
+    explicit FScopedBakerSettingsRestore(UNiagaraBakerSettings* InSettings)
+        : Settings(InSettings)
+    {
+        if (Settings)
+        {
+            StartSeconds = Settings->StartSeconds;
+            DurationSeconds = Settings->DurationSeconds;
+            FramesPerSecond = Settings->FramesPerSecond;
+            FramesPerDimension = Settings->FramesPerDimension;
+            bLockToSimulationFrameRate = Settings->bLockToSimulationFrameRate;
+            bRenderComponentOnly = Settings->bRenderComponentOnly;
+        }
+    }
+
+    ~FScopedBakerSettingsRestore()
+    {
+        if (Settings)
+        {
+            Settings->StartSeconds = StartSeconds;
+            Settings->DurationSeconds = DurationSeconds;
+            Settings->FramesPerSecond = FramesPerSecond;
+            Settings->FramesPerDimension = FramesPerDimension;
+            Settings->bLockToSimulationFrameRate = bLockToSimulationFrameRate;
+            Settings->bRenderComponentOnly = bRenderComponentOnly;
+        }
+    }
+
+    UNiagaraBakerSettings* Settings = nullptr;
+    float StartSeconds = 0.0f;
+    float DurationSeconds = 0.0f;
+    int32 FramesPerSecond = 60;
+    FIntPoint FramesPerDimension = FIntPoint(8, 8);
+    bool bLockToSimulationFrameRate = false;
+    bool bRenderComponentOnly = true;
+};
+
+class FLocalNiagaraBakeRenderer
+{
+public:
+    explicit FLocalNiagaraBakeRenderer(UNiagaraSystem* InNiagaraSystem)
+        : NiagaraSystem(InNiagaraSystem)
+    {
+        check(NiagaraSystem);
+
+        PreviewComponent = NewObject<UNiagaraComponent>(GetTransientPackage(), NAME_None, RF_Transient);
+        PreviewComponent->CastShadow = true;
+        PreviewComponent->bCastDynamicShadow = true;
+        PreviewComponent->SetAllowScalability(false);
+        PreviewComponent->SetAsset(NiagaraSystem);
+        PreviewComponent->SetForceSolo(true);
+        PreviewComponent->SetAgeUpdateMode(ENiagaraAgeUpdateMode::DesiredAge);
+        PreviewComponent->SetCanRenderWhileSeeking(true);
+        PreviewComponent->SetMaxSimTime(0.0f);
+        PreviewComponent->Activate(true);
+
+        PreviewScene = MakeShared<FAdvancedPreviewScene>(FPreviewScene::ConstructionValues());
+        PreviewScene->SetFloorVisibility(false);
+        PreviewScene->AddComponent(PreviewComponent, PreviewComponent->GetRelativeTransform());
+    }
+
+    ~FLocalNiagaraBakeRenderer()
+    {
+        if (PreviewScene.IsValid() && PreviewComponent)
+        {
+            PreviewScene->RemoveComponent(PreviewComponent);
+            PreviewScene.Reset();
+        }
+
+        if (PreviewComponent)
+        {
+            PreviewComponent->DestroyComponent();
+            PreviewComponent = nullptr;
+        }
+
+        if (SceneCaptureComponent)
+        {
+            SceneCaptureComponent->DestroyComponent();
+            SceneCaptureComponent = nullptr;
+        }
+    }
+
+    void SetAbsoluteTime(UNiagaraBakerSettings* BakerSettings, float AbsoluteTime, bool bShouldTickComponent = true)
+    {
+        if (!BakerSettings || !PreviewComponent)
+        {
+            return;
+        }
+
+        if (!PreviewComponent->IsActive())
+        {
+            PreviewComponent->Activate(true);
+        }
+
+        if (AbsoluteTime < PreviewComponent->GetDesiredAge())
+        {
+            PreviewComponent->ReinitializeSystem();
+        }
+
+        UWorld* World = PreviewComponent->GetWorld();
+        if (World)
+        {
+            World->TimeSeconds = AbsoluteTime;
+            World->UnpausedTimeSeconds = AbsoluteTime;
+            World->RealTimeSeconds = AbsoluteTime;
+            World->DeltaRealTimeSeconds = BakerSettings->GetSeekDelta();
+            World->DeltaTimeSeconds = BakerSettings->GetSeekDelta();
+        }
+
+        if (bShouldTickComponent)
+        {
+            PreviewComponent->ReinitializeSystem();
+            if (AbsoluteTime > SMALL_NUMBER)
+            {
+                PreviewComponent->AdvanceSimulationByTime(AbsoluteTime, BakerSettings->GetSeekDelta());
+            }
+
+            if (World)
+            {
+                World->SendAllEndOfFrameUpdates();
+                if (FNiagaraWorldManager* WorldManager = FNiagaraWorldManager::Get(World))
+                {
+                    WorldManager->FlushComputeAndDeferredQueues(false);
+                }
+            }
+        }
+    }
+
+    void RenderSceneCapture(UNiagaraBakerSettings* BakerSettings, UTextureRenderTarget2D* RenderTarget, ESceneCaptureSource CaptureSource)
+    {
+        if (!BakerSettings || !PreviewComponent || !RenderTarget)
+        {
+            return;
+        }
+
+        UWorld* World = PreviewComponent->GetWorld();
+        if (!World)
+        {
+            return;
+        }
+
+        if (SceneCaptureComponent == nullptr)
+        {
+            SceneCaptureComponent = NewObject<USceneCaptureComponent2D>(GetTransientPackage(), NAME_None, RF_Transient);
+            SceneCaptureComponent->bTickInEditor = false;
+            SceneCaptureComponent->SetComponentTickEnabled(false);
+            SceneCaptureComponent->SetVisibility(true);
+            SceneCaptureComponent->bCaptureEveryFrame = false;
+            SceneCaptureComponent->bCaptureOnMovement = false;
+        }
+
+        SceneCaptureComponent->RegisterComponentWithWorld(World);
+        SceneCaptureComponent->TextureTarget = RenderTarget;
+        SceneCaptureComponent->CaptureSource = CaptureSource;
+
+        const FNiagaraBakerCameraSettings& CurrentCamera = BakerSettings->GetCurrentCamera();
+        if (CurrentCamera.IsOrthographic())
+        {
+            SceneCaptureComponent->ProjectionType = ECameraProjectionMode::Orthographic;
+            SceneCaptureComponent->OrthoWidth = CurrentCamera.OrthoWidth;
+        }
+        else
+        {
+            SceneCaptureComponent->ProjectionType = ECameraProjectionMode::Perspective;
+            SceneCaptureComponent->FOVAngle = CurrentCamera.FOV;
+        }
+
+        const FMatrix SceneCaptureMatrix = FMatrix(
+            FPlane(0, 0, 1, 0),
+            FPlane(1, 0, 0, 0),
+            FPlane(0, 1, 0, 0),
+            FPlane(0, 0, 0, 1)
+        );
+        const FMatrix ViewMatrix =
+            SceneCaptureMatrix *
+            BakerSettings->GetViewportMatrix().Inverse() *
+            FRotationTranslationMatrix(BakerSettings->GetCameraRotation(), BakerSettings->GetCameraLocation());
+        SceneCaptureComponent->SetWorldLocationAndRotation(ViewMatrix.GetOrigin(), ViewMatrix.Rotator());
+        SceneCaptureComponent->bUseCustomProjectionMatrix = true;
+        SceneCaptureComponent->CustomProjectionMatrix = BakerSettings->GetProjectionMatrix();
+
+        if (BakerSettings->bRenderComponentOnly)
+        {
+            const TArray<TObjectPtr<USceneComponent>>& AttachChildren = PreviewComponent->GetAttachChildren();
+            SceneCaptureComponent->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+            SceneCaptureComponent->ShowOnlyComponents.Empty(1 + AttachChildren.Num());
+            SceneCaptureComponent->ShowOnlyComponents.Add(PreviewComponent);
+            for (TWeakObjectPtr<USceneComponent> WeakChildComponent : AttachChildren)
+            {
+                if (UPrimitiveComponent* ChildComponent = Cast<UPrimitiveComponent>(WeakChildComponent.Get()))
+                {
+                    SceneCaptureComponent->ShowOnlyComponents.Add(ChildComponent);
+                }
+            }
+        }
+        else
+        {
+            SceneCaptureComponent->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_RenderScenePrimitives;
+        }
+
+        SceneCaptureComponent->CaptureScene();
+        SceneCaptureComponent->TextureTarget = nullptr;
+        SceneCaptureComponent->UnregisterComponent();
+    }
+
+private:
+    TObjectPtr<UNiagaraSystem> NiagaraSystem = nullptr;
+    TObjectPtr<UNiagaraComponent> PreviewComponent = nullptr;
+    TSharedPtr<FAdvancedPreviewScene> PreviewScene;
+    TObjectPtr<USceneCaptureComponent2D> SceneCaptureComponent = nullptr;
+};
+
+static FString NormalizeBakeFileExtension(const FString& FileExtension)
+{
+    if (FileExtension.IsEmpty())
+    {
+        return TEXT(".png");
+    }
+    return FileExtension.StartsWith(TEXT(".")) ? FileExtension : TEXT(".") + FileExtension;
+}
+
+static FIntPoint ResolveBakeFrameSize(UNiagaraBakerSettings* BakerSettings, int32 RequestedWidth, int32 RequestedHeight)
+{
+    int32 Width = RequestedWidth;
+    int32 Height = RequestedHeight;
+
+    if ((Width <= 0 || Height <= 0) && BakerSettings)
+    {
+        for (UNiagaraBakerOutput* Output : BakerSettings->Outputs)
+        {
+            if (const UNiagaraBakerOutputTexture2D* TextureOutput = Cast<UNiagaraBakerOutputTexture2D>(Output))
+            {
+                if (Width <= 0)
+                {
+                    Width = TextureOutput->FrameSize.X;
+                }
+                if (Height <= 0)
+                {
+                    Height = TextureOutput->FrameSize.Y;
+                }
+                break;
+            }
+        }
+    }
+
+    if (Width <= 0)
+    {
+        Width = 512;
+    }
+    if (Height <= 0)
+    {
+        Height = 512;
+    }
+
+    return FIntPoint(Width, Height);
+}
+
+static bool TryResolveBakeOutputDirectory(const FString& AssetPath, const FString& RequestedOutputDir, FString& OutOutputDir, FString& OutError)
+{
+    if (!RequestedOutputDir.IsEmpty())
+    {
+        OutOutputDir = FPaths::ConvertRelativePathToFull(RequestedOutputDir);
+        return true;
+    }
+
+    const FString PackageName = FPackageName::ObjectPathToPackageName(AssetPath);
+    FString PackageFilename;
+    if (!FPackageName::TryConvertLongPackageNameToFilename(PackageName, PackageFilename, TEXT(".uasset")))
+    {
+        OutError = FString::Printf(TEXT("Failed to resolve disk path for Niagara asset: %s"), *AssetPath);
+        return false;
+    }
+
+    OutOutputDir = FPaths::GetPath(PackageFilename);
+    return true;
+}
+
+static UTextureRenderTarget2D* CreateBakeRenderTarget(const FIntPoint& FrameSize)
+{
+    UTextureRenderTarget2D* RenderTarget = NewObject<UTextureRenderTarget2D>(GetTransientPackage(), NAME_None, RF_Transient);
+    RenderTarget->ClearColor = FLinearColor::Transparent;
+    RenderTarget->InitCustomFormat(FrameSize.X, FrameSize.Y, PF_FloatRGBA, false);
+    RenderTarget->UpdateResourceImmediate(true);
+    return RenderTarget;
+}
+
+static bool ReadBakePixels(UTextureRenderTarget2D* RenderTarget, TArray<FFloat16Color>& OutPixels)
+{
+    if (!RenderTarget)
+    {
+        return false;
+    }
+
+    FlushRenderingCommands();
+    if (FTextureRenderTargetResource* Resource = RenderTarget->GameThread_GetRenderTargetResource())
+    {
+        return Resource->ReadFloat16Pixels(OutPixels);
+    }
+    return false;
+}
+
+static bool ExportBakeImage(const FString& FilePath, FIntPoint ImageSize, TArrayView<FFloat16Color> ImageData)
+{
+    const FString FileExtension = FPaths::GetExtension(FilePath, true);
+    const EImageFormat ImageFormat = ImageWrapperHelper::GetImageFormat(FileExtension);
+    if (ImageFormat == EImageFormat::Invalid)
+    {
+        return false;
+    }
+
+    IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>("ImageWrapper");
+    TSharedPtr<IImageWrapper> ImageWrapper = ImageWrapperModule.CreateImageWrapper(ImageFormat);
+    if (!ImageWrapper.IsValid())
+    {
+        return false;
+    }
+
+    if (ImageFormat == EImageFormat::EXR || ImageFormat == EImageFormat::HDR)
+    {
+        TArray<FLinearColor> TempImageData;
+        TempImageData.Reserve(ImageData.Num());
+        for (const FFloat16Color& HalfColor : ImageData)
+        {
+            TempImageData.Emplace(HalfColor.GetFloats());
+        }
+
+        if (!ImageWrapper->SetRaw(
+            TempImageData.GetData(),
+            TempImageData.Num() * TempImageData.GetTypeSize(),
+            ImageSize.X,
+            ImageSize.Y,
+            ERGBFormat::RGBAF,
+            32))
+        {
+            return false;
+        }
+    }
+    else
+    {
+        TArray<FColor> TempImageData;
+        TempImageData.Reserve(ImageData.Num());
+        for (const FFloat16Color& HalfColor : ImageData)
+        {
+            TempImageData.Add(HalfColor.GetFloats().ToFColor(true));
+        }
+
+        if (!ImageWrapper->SetRaw(
+            TempImageData.GetData(),
+            TempImageData.Num() * TempImageData.GetTypeSize(),
+            ImageSize.X,
+            ImageSize.Y,
+            ERGBFormat::BGRA,
+            8))
+        {
+            return false;
+        }
+    }
+
+    const TArray64<uint8> CompressedData = ImageWrapper->GetCompressed();
+    return FFileHelper::SaveArrayToFile(CompressedData, *FilePath);
+}
+
+static void MergeBeautyAndAlphaPixels(
+    const TArray<FFloat16Color>& BeautyPixels,
+    const TArray<FFloat16Color>& AlphaPixels,
+    TArray<FFloat16Color>& OutMergedPixels)
+{
+    check(BeautyPixels.Num() == AlphaPixels.Num());
+
+    OutMergedPixels.SetNumUninitialized(BeautyPixels.Num());
+    for (int32 PixelIndex = 0; PixelIndex < BeautyPixels.Num(); ++PixelIndex)
+    {
+        const FLinearColor BeautyColor = BeautyPixels[PixelIndex].GetFloats();
+        const FLinearColor AlphaColor = AlphaPixels[PixelIndex].GetFloats();
+        OutMergedPixels[PixelIndex] = FFloat16Color(FLinearColor(
+            BeautyColor.R,
+            BeautyColor.G,
+            BeautyColor.B,
+            FMath::Clamp(1.0f - AlphaColor.A, 0.0f, 1.0f)
+        ));
+    }
+}
 }
 
 TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleCommand(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
@@ -71,6 +481,10 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleCommand(const FStri
     {
         return HandleGetNiagaraParticleAttributes(Params);
     }
+    else if (CommandType == TEXT("bake_niagara_system"))
+    {
+        return HandleBakeNiagaraSystem(Params);
+    }
     else
     {
         TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject);
@@ -83,6 +497,225 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleCommand(const FStri
 UNiagaraSystem* FEpicUnrealMCPNiagaraCommands::LoadNiagaraSystemAsset(const FString& AssetPath)
 {
     return LoadObject<UNiagaraSystem>(nullptr, *AssetPath);
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleBakeNiagaraSystem(const TSharedPtr<FJsonObject>& Params)
+{
+    TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject);
+
+#if WITH_EDITOR
+    FString AssetPath;
+    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("Missing required parameter: asset_path"));
+        return Result;
+    }
+
+    UNiagaraSystem* NiagaraSystem = LoadNiagaraSystemAsset(AssetPath);
+    if (!NiagaraSystem)
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to load Niagara system: %s"), *AssetPath));
+        return Result;
+    }
+
+    UNiagaraBakerSettings* BakerSettings = NiagaraSystem->GetBakerSettings();
+    if (!BakerSettings)
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("Niagara system does not provide baker settings"));
+        return Result;
+    }
+
+    FString RequestedOutputDir;
+    Params->TryGetStringField(TEXT("output_dir"), RequestedOutputDir);
+
+    FString RequestedOutputPrefix;
+    Params->TryGetStringField(TEXT("output_prefix"), RequestedOutputPrefix);
+
+    FString FileExtension = TEXT(".png");
+    Params->TryGetStringField(TEXT("file_extension"), FileExtension);
+    FileExtension = NormalizeBakeFileExtension(FileExtension);
+
+    double NumberValue = 0.0;
+
+    int32 FrameWidth = 0;
+    if (Params->TryGetNumberField(TEXT("frame_width"), NumberValue))
+    {
+        FrameWidth = FMath::RoundToInt(NumberValue);
+    }
+
+    int32 FrameHeight = 0;
+    if (Params->TryGetNumberField(TEXT("frame_height"), NumberValue))
+    {
+        FrameHeight = FMath::RoundToInt(NumberValue);
+    }
+
+    float StartSeconds = BakerSettings->StartSeconds;
+    if (Params->TryGetNumberField(TEXT("start_seconds"), NumberValue))
+    {
+        StartSeconds = static_cast<float>(NumberValue);
+    }
+
+    float DurationSeconds = BakerSettings->DurationSeconds;
+    if (Params->TryGetNumberField(TEXT("duration_seconds"), NumberValue))
+    {
+        DurationSeconds = static_cast<float>(NumberValue);
+    }
+
+    int32 FramesPerSecond = BakerSettings->FramesPerSecond;
+    if (Params->TryGetNumberField(TEXT("frames_per_second"), NumberValue))
+    {
+        FramesPerSecond = FMath::RoundToInt(NumberValue);
+    }
+
+    int32 FramesX = BakerSettings->FramesPerDimension.X;
+    if (Params->TryGetNumberField(TEXT("frames_x"), NumberValue))
+    {
+        FramesX = FMath::RoundToInt(NumberValue);
+    }
+
+    int32 FramesY = BakerSettings->FramesPerDimension.Y;
+    if (Params->TryGetNumberField(TEXT("frames_y"), NumberValue))
+    {
+        FramesY = FMath::RoundToInt(NumberValue);
+    }
+
+    bool bRenderComponentOnly = BakerSettings->bRenderComponentOnly;
+    Params->TryGetBoolField(TEXT("render_component_only"), bRenderComponentOnly);
+
+    bool bLockToSimulationFrameRate = BakerSettings->bLockToSimulationFrameRate;
+    Params->TryGetBoolField(TEXT("lock_to_simulation_frame_rate"), bLockToSimulationFrameRate);
+
+    if (DurationSeconds <= 0.0f)
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("duration_seconds must be greater than 0"));
+        return Result;
+    }
+
+    if (FramesPerSecond <= 0)
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("frames_per_second must be greater than 0"));
+        return Result;
+    }
+
+    if (FramesX <= 0 || FramesY <= 0)
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("frames_x and frames_y must be greater than 0"));
+        return Result;
+    }
+
+    FString OutputDir;
+    FString OutputError;
+    if (!TryResolveBakeOutputDirectory(AssetPath, RequestedOutputDir, OutputDir, OutputError))
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), OutputError);
+        return Result;
+    }
+
+    if (!IFileManager::Get().DirectoryExists(*OutputDir) && !IFileManager::Get().MakeDirectory(*OutputDir, true))
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to create output directory: %s"), *OutputDir));
+        return Result;
+    }
+
+    const FIntPoint FrameSize = ResolveBakeFrameSize(BakerSettings, FrameWidth, FrameHeight);
+    const int32 TotalFrames = FramesX * FramesY;
+    const float FrameDeltaSeconds = DurationSeconds / static_cast<float>(TotalFrames);
+    const FString OutputPrefix = RequestedOutputPrefix.IsEmpty() ? NiagaraSystem->GetName() : RequestedOutputPrefix;
+
+    FScopedBakerSettingsRestore ScopedRestore(BakerSettings);
+    BakerSettings->StartSeconds = StartSeconds;
+    BakerSettings->DurationSeconds = DurationSeconds;
+    BakerSettings->FramesPerSecond = FramesPerSecond;
+    BakerSettings->FramesPerDimension = FIntPoint(FramesX, FramesY);
+    BakerSettings->bRenderComponentOnly = bRenderComponentOnly;
+    BakerSettings->bLockToSimulationFrameRate = bLockToSimulationFrameRate;
+
+    UTextureRenderTarget2D* BeautyRenderTarget = CreateBakeRenderTarget(FrameSize);
+    UTextureRenderTarget2D* AlphaRenderTarget = CreateBakeRenderTarget(FrameSize);
+    if (!BeautyRenderTarget || !AlphaRenderTarget)
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("Failed to allocate bake render targets"));
+        return Result;
+    }
+
+    FLocalNiagaraBakeRenderer BakeRenderer(NiagaraSystem);
+
+    TArray<FFloat16Color> BeautyPixels;
+    TArray<FFloat16Color> AlphaPixels;
+    TArray<FFloat16Color> MergedPixels;
+    TArray<TSharedPtr<FJsonValue>> OutputFiles;
+
+    for (int32 FrameIndex = 0; FrameIndex < TotalFrames; ++FrameIndex)
+    {
+        const float FrameTime = StartSeconds + (static_cast<float>(FrameIndex) * FrameDeltaSeconds);
+        BakeRenderer.SetAbsoluteTime(BakerSettings, FrameTime);
+        BakeRenderer.RenderSceneCapture(BakerSettings, BeautyRenderTarget, ESceneCaptureSource::SCS_FinalToneCurveHDR);
+        BakeRenderer.RenderSceneCapture(BakerSettings, AlphaRenderTarget, ESceneCaptureSource::SCS_SceneColorHDR);
+
+        if (!ReadBakePixels(BeautyRenderTarget, BeautyPixels))
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to read beauty pixels for frame %d"), FrameIndex));
+            return Result;
+        }
+        if (!ReadBakePixels(AlphaRenderTarget, AlphaPixels))
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to read alpha pixels for frame %d"), FrameIndex));
+            return Result;
+        }
+        if (BeautyPixels.Num() != AlphaPixels.Num())
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Beauty/alpha pixel count mismatch on frame %d"), FrameIndex));
+            return Result;
+        }
+
+        MergeBeautyAndAlphaPixels(BeautyPixels, AlphaPixels, MergedPixels);
+
+        const FString FileName = FString::Printf(TEXT("%s_%04d%s"), *OutputPrefix, FrameIndex, *FileExtension);
+        const FString FilePath = FPaths::Combine(OutputDir, FileName);
+        if (!ExportBakeImage(FilePath, FrameSize, MergedPixels))
+        {
+            Result->SetBoolField(TEXT("success"), false);
+            Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to export baked frame: %s"), *FilePath));
+            return Result;
+        }
+
+        OutputFiles.Add(MakeShareable(new FJsonValueString(FilePath)));
+    }
+
+    Result->SetBoolField(TEXT("success"), true);
+    Result->SetStringField(TEXT("asset_path"), AssetPath);
+    Result->SetStringField(TEXT("asset_name"), NiagaraSystem->GetName());
+    Result->SetStringField(TEXT("output_dir"), OutputDir);
+    Result->SetStringField(TEXT("output_prefix"), OutputPrefix);
+    Result->SetStringField(TEXT("file_extension"), FileExtension);
+    Result->SetNumberField(TEXT("frame_width"), FrameSize.X);
+    Result->SetNumberField(TEXT("frame_height"), FrameSize.Y);
+    Result->SetNumberField(TEXT("frame_count"), TotalFrames);
+    Result->SetNumberField(TEXT("frames_x"), FramesX);
+    Result->SetNumberField(TEXT("frames_y"), FramesY);
+    Result->SetNumberField(TEXT("frames_per_second"), FramesPerSecond);
+    Result->SetNumberField(TEXT("start_seconds"), StartSeconds);
+    Result->SetNumberField(TEXT("duration_seconds"), DurationSeconds);
+    Result->SetBoolField(TEXT("render_component_only"), bRenderComponentOnly);
+    Result->SetArrayField(TEXT("files"), OutputFiles);
+    return Result;
+#else
+    Result->SetBoolField(TEXT("success"), false);
+    Result->SetStringField(TEXT("error"), TEXT("bake_niagara_system is only available in editor builds"));
+    return Result;
+#endif
 }
 
 // ============================================================================
@@ -204,7 +837,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetEmitterDetails(FNiagar
     }
     
     // Stateless modules (UE 5.7+)
-#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7)
+#if TAAGENT_WITH_NIAGARA_STATELESS
     if (bIsStateless && (ShouldInclude(IncludeSections, TEXT("modules")) || ShouldInclude(IncludeSections, TEXT("all"))))
     {
         TArray<TSharedPtr<FJsonValue>> ModulesJson;
@@ -391,7 +1024,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetEmitterDetails(FNiagar
         if (bIsStateless)
         {
             // Stateless parameters
-#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7)
+#if TAAGENT_WITH_NIAGARA_STATELESS
             UNiagaraStatelessEmitter* StatelessEmitter = Handle.GetStatelessEmitter();
             if (StatelessEmitter)
             {
@@ -902,7 +1535,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::ProcessEmitterOperation(U
     // Convert to Stateless mode (UE 5.7+)
     else if (Action == TEXT("convert_to_stateless"))
     {
-#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7)
+#if TAAGENT_WITH_NIAGARA_STATELESS
         // Check if already Stateless
         if (Handle->GetEmitterMode() == ENiagaraEmitterMode::Stateless)
         {
@@ -1338,7 +1971,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::ProcessStatelessModuleOpe
 {
     TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject);
     
-#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7)
+#if TAAGENT_WITH_NIAGARA_STATELESS
     FString EmitterName = Op->GetStringField(TEXT("emitter"));
     FString ModuleName = Op->GetStringField(TEXT("name"));
     FString Action = Op->GetStringField(TEXT("action"));

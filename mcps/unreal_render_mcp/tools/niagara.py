@@ -20,6 +20,54 @@ from common import send_command, save_json_to_file, with_unreal_connection
 logger = logging.getLogger("UnrealRenderMCP")
 
 
+def _resolve_niagara_asset_path(
+    asset_path: Optional[str] = None,
+    asset_name: Optional[str] = None
+) -> Optional[str]:
+    if asset_path:
+        return asset_path
+
+    from editor import get_editor_context
+
+    context = get_editor_context()
+    if context.get("status") != "success":
+        return None
+
+    result = context.get("result", {})
+    candidates: List[Dict[str, Any]] = []
+
+    active_editor = result.get("active_asset_editor") or {}
+    if active_editor.get("asset_type_name") == "NiagaraSystem":
+        candidates.extend(active_editor.get("assets") or [])
+
+    for editor in result.get("open_asset_editors") or []:
+        if editor.get("asset_type_name") == "NiagaraSystem":
+            candidates.extend(editor.get("assets") or [])
+
+    for asset in result.get("open_assets") or []:
+        if asset.get("class_name") == "NiagaraSystem":
+            candidates.append(asset)
+
+    def matches_name(candidate: Dict[str, Any]) -> bool:
+        if not asset_name:
+            return True
+        candidate_names = {
+            candidate.get("name"),
+            candidate.get("asset_name"),
+            candidate.get("package_name"),
+            candidate.get("asset_path"),
+        }
+        return asset_name in {name for name in candidate_names if name}
+
+    for candidate in candidates:
+        if matches_name(candidate):
+            resolved_path = candidate.get("asset_path")
+            if resolved_path:
+                return resolved_path
+
+    return None
+
+
 # ============================================================================
 # Graph Form Tools - Read/Update Niagara Script Graphs
 # ============================================================================
@@ -392,3 +440,77 @@ def get_niagara_particle_attributes(
         params["emitter"] = emitter
     
     return send_command("get_niagara_particle_attributes", params)
+
+
+@with_unreal_connection
+def bake_niagara_system(
+    asset_path: Optional[str] = None,
+    asset_name: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    output_prefix: str = "",
+    frame_width: int = 0,
+    frame_height: int = 0,
+    start_seconds: Optional[float] = None,
+    duration_seconds: Optional[float] = None,
+    frames_per_second: int = 0,
+    frames_x: int = 0,
+    frames_y: int = 0,
+    render_component_only: Optional[bool] = None,
+    file_extension: str = ".png"
+) -> Dict[str, Any]:
+    """
+    Bake a Niagara System to a frame sequence with final-color RGB and merged alpha.
+
+    If `asset_path` is omitted, the tool tries to use the currently active/open Niagara
+    asset from the editor context.
+
+    Args:
+        asset_path: Full Niagara System asset path.
+        asset_name: Optional name to match against currently open Niagara assets.
+        output_dir: Optional absolute output directory. Defaults to the asset's on-disk folder.
+        output_prefix: Optional output file prefix. Defaults to the asset name.
+        frame_width: Optional output frame width. Defaults to current baker frame size or 512.
+        frame_height: Optional output frame height. Defaults to current baker frame size or 512.
+        start_seconds: Optional override for baker start time.
+        duration_seconds: Optional override for baker duration.
+        frames_per_second: Optional override for baker simulation FPS.
+        frames_x: Optional override for bake frame grid X count.
+        frames_y: Optional override for bake frame grid Y count.
+        render_component_only: Optional override for component-only rendering.
+        file_extension: Image extension, usually ".png" or ".exr".
+    """
+    resolved_asset_path = _resolve_niagara_asset_path(asset_path=asset_path, asset_name=asset_name)
+    if not resolved_asset_path:
+        return {
+            "success": False,
+            "error": "Unable to resolve a Niagara System asset path from the provided arguments or current editor context"
+        }
+
+    params: Dict[str, Any] = {
+        "asset_path": resolved_asset_path,
+    }
+
+    if output_dir:
+        params["output_dir"] = output_dir
+    if output_prefix:
+        params["output_prefix"] = output_prefix
+    if frame_width > 0:
+        params["frame_width"] = frame_width
+    if frame_height > 0:
+        params["frame_height"] = frame_height
+    if start_seconds is not None:
+        params["start_seconds"] = start_seconds
+    if duration_seconds is not None:
+        params["duration_seconds"] = duration_seconds
+    if frames_per_second > 0:
+        params["frames_per_second"] = frames_per_second
+    if frames_x > 0:
+        params["frames_x"] = frames_x
+    if frames_y > 0:
+        params["frames_y"] = frames_y
+    if render_component_only is not None:
+        params["render_component_only"] = render_component_only
+    if file_extension:
+        params["file_extension"] = file_extension
+
+    return send_command("bake_niagara_system", params)

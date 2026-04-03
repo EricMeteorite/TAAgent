@@ -23,14 +23,44 @@ UE_PORT = 9876
 RPC_SCRIPT_PATH = None
 
 
+def _repo_root() -> Path:
+    """Resolve the repository root from this file location."""
+    return Path(__file__).resolve().parents[4]
+
+
 def get_project_path():
     """获取工程路径"""
-    return r'd:\CodeBuddy\rendering-mcp\plugins\unreal\UnrealMCP\RenderingMCP\RenderingMCP.uproject'
+    env_path = os.environ.get("TAAGENT_UE_UPROJECT")
+    if env_path:
+        return env_path
+
+    sample_project = (
+        _repo_root()
+        / "plugins"
+        / "unreal"
+        / "UnrealMCP"
+        / "RenderingMCP"
+        / "RenderingMCP.uproject"
+    )
+    return str(sample_project)
 
 
 def get_ue_path():
     """获取 UE 路径"""
-    return r'E:\UE\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe'
+    configured_path = os.environ.get("UE_EDITOR_PATH")
+    if configured_path:
+        return configured_path
+
+    for candidate in (
+        r"C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe",
+        r"C:\Program Files\Epic Games\UE_5.6\Engine\Binaries\Win64\UnrealEditor.exe",
+        r"C:\Program Files\Epic Games\UE_5.5\Engine\Binaries\Win64\UnrealEditor.exe",
+        r"C:\Program Files\Epic Games\UE_5.4\Engine\Binaries\Win64\UnrealEditor.exe",
+    ):
+        if Path(candidate).exists():
+            return candidate
+
+    return "UnrealEditor.exe"
 
 
 def start_ue_editor(project_path: str, ue_path: str, headless: bool = False):

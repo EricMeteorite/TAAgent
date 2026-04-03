@@ -2,12 +2,15 @@
 """Complete workflow test: import texture, mesh, create material, apply to mesh."""
 
 import json
+import os
 import time
 from pathlib import Path
 
-TEMP_DIR = Path("C:/Users/LK867/AppData/Local/Temp/ue_cli")
+REPO_ROOT = Path(__file__).resolve().parents[4]
+TEMP_DIR = Path(os.environ.get("UE_CLI_TEMP_DIR", str(REPO_ROOT / ".taagent-local" / "tmp" / "ue_cli")))
 COMMAND_FILE = TEMP_DIR / "command.json"
 RESULT_FILE = TEMP_DIR / "result.json"
+OUTPUT_DIR = REPO_ROOT / "output"
 
 def send_command(cmd_type: str, params: dict, wait_seconds: float = 3.0) -> dict:
     """Send command and wait for result."""
@@ -43,7 +46,7 @@ def main():
     # Step 1: Import texture
     print("\n[1] Importing texture...")
     result = send_command("import_asset", {
-        "source_path": "d:/CodeBuddy/rendering-mcp/output/lookdev_rgb.png",
+        "source_path": str(OUTPUT_DIR / "lookdev_rgb.png"),
         "destination_path": "/Game/Test/Textures"
     })
     print(f"    Result: {result.get('success', False)}")
@@ -57,7 +60,7 @@ def main():
     # Step 2: Import mesh
     print("\n[2] Importing mesh...")
     result = send_command("import_asset", {
-        "source_path": "d:/CodeBuddy/rendering-mcp/output/test_cube.obj",
+        "source_path": str(OUTPUT_DIR / "test_cube.obj"),
         "destination_path": "/Game/Test/Meshes"
     })
     print(f"    Result: {result.get('success', False)}")

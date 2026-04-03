@@ -52,11 +52,20 @@ from tools import (
     update_niagara_emitter,
     get_niagara_compiled_code,
     get_niagara_particle_attributes,
+    bake_niagara_system,
     # Viewport
     get_viewport_screenshot,
     set_viewport_camera,
     get_viewport_camera,
     # Editor
+    get_editor_context,
+    get_open_asset_editors,
+    get_selected_assets,
+    get_selected_actors,
+    open_asset,
+    focus_asset_editor,
+    close_asset_editors,
+    save_asset,
     create_level,
     load_level,
     save_current_level,
@@ -67,12 +76,20 @@ from tools import (
 )
 
 
-# Configure logging
+# Configure logging – write to .taagent-local/logs/ when available, else CWD
+_log_dir = os.environ.get("TAAGENT_RUNTIME_ROOT")
+_log_path = (
+    os.path.join(_log_dir, "logs", "unreal_render_mcp.log")
+    if _log_dir
+    else "unreal_render_mcp.log"
+)
+os.makedirs(os.path.dirname(_log_path) if os.path.dirname(_log_path) else ".", exist_ok=True)
+
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
     handlers=[
-        logging.FileHandler('unreal_render_mcp.log'),
+        logging.FileHandler(_log_path),
     ]
 )
 logger = logging.getLogger("UnrealRenderMCP")
@@ -156,6 +173,7 @@ mcp.tool()(get_niagara_emitter)
 mcp.tool()(update_niagara_emitter)
 mcp.tool()(get_niagara_compiled_code)
 mcp.tool()(get_niagara_particle_attributes)
+mcp.tool()(bake_niagara_system)
 
 
 # ============================================================================
@@ -171,6 +189,14 @@ mcp.tool()(get_viewport_camera)
 # Register Editor Tools
 # ============================================================================
 
+mcp.tool()(get_editor_context)
+mcp.tool()(get_open_asset_editors)
+mcp.tool()(get_selected_assets)
+mcp.tool()(get_selected_actors)
+mcp.tool()(open_asset)
+mcp.tool()(focus_asset_editor)
+mcp.tool()(close_asset_editors)
+mcp.tool()(save_asset)
 mcp.tool()(create_level)
 mcp.tool()(load_level)
 mcp.tool()(save_current_level)

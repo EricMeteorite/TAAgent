@@ -3,7 +3,7 @@
 ## Backend Engine Identification
 
 ### Core Components
-- **Unreal Engine 5.7** - Source available at `E:\UE\UE_5.7`
+- **Unreal Engine 5.7** - Source available in your local UE source checkout (for example `UE_SOURCE_ROOT`)
 - **Editor API** - Located in `Engine/Source/Editor/`
 - **Python Scripting** - Built-in Python plugin
 - **MCP Integration** - Existing `UnrealMCP` plugin with WebSocket server

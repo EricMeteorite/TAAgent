@@ -28,7 +28,7 @@ Output:
 {
   "ue_running": true,
   "ue_version": "UE_5.7",
-  "temp_dir": "C:\\Users\\...\\Temp\\ue_cli"
+  "temp_dir": "<temp>/ue_cli"
 }
 ```
 
@@ -223,7 +223,7 @@ ue-cli asset import <source_path> <destination_path>
 
 Example:
 ```bash
-ue-cli asset import C:/model.fbx /Game/Models
+ue-cli asset import <path-to-model.fbx> /Game/Models
 ```
 
 ### screenshot
@@ -246,7 +246,7 @@ Examples:
 ue-cli screenshot capture
 
 # Custom path and resolution
-ue-cli screenshot capture -o C:/screenshot.png -r 3840,2160
+ue-cli screenshot capture -o <path-to-screenshot.png> -r 3840,2160
 ```
 
 ### python

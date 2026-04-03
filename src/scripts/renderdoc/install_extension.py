@@ -10,7 +10,11 @@ from pathlib import Path
 
 
 def get_extension_dir():
-    """Get RenderDoc extension directory"""
+    """Get RenderDoc extension directory."""
+    configured_dir = os.environ.get("RENDERDOC_EXTENSION_DIR")
+    if configured_dir:
+        return Path(configured_dir)
+
     if sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
         if appdata:
@@ -22,16 +26,28 @@ def get_extension_dir():
     raise RuntimeError("Cannot determine RenderDoc extension directory")
 
 
-def install():
-    """Install the extension"""
-    # Source directory - project root is parent of scripts/
-    script_dir = Path(__file__).parent
-    project_root = script_dir.parent.parent  # Go up from scripts/renderdoc to rendering-mcp
-    extension_src = project_root / "renderdoc_extension"
+def get_extension_source():
+    """Locate the extension source directory inside the repository."""
+    script_dir = Path(__file__).resolve().parent
+    project_root = script_dir.parents[2]
+    candidates = [
+        project_root / "src" / "extension",
+        project_root / "renderdoc_extension",
+    ]
 
-    if not extension_src.exists():
-        print("Error: Extension source not found at %s" % extension_src)
-        sys.exit(1)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    raise RuntimeError(
+        "Extension source not found. Expected one of: %s"
+        % ", ".join(str(candidate) for candidate in candidates)
+    )
+
+
+def install():
+    """Install the extension."""
+    extension_src = get_extension_source()
 
     # Destination directory
     ext_dir = get_extension_dir()

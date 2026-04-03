@@ -49,6 +49,7 @@ from niagara import (
     update_niagara_emitter,
     get_niagara_compiled_code,
     get_niagara_particle_attributes,
+    bake_niagara_system,
 )
 
 from viewport import (
@@ -58,6 +59,14 @@ from viewport import (
 )
 
 from editor import (
+    get_editor_context,
+    get_open_asset_editors,
+    get_selected_assets,
+    get_selected_actors,
+    open_asset,
+    focus_asset_editor,
+    close_asset_editors,
+    save_asset,
     create_level,
     load_level,
     save_current_level,
@@ -101,11 +110,20 @@ __all__ = [
     "update_niagara_emitter",
     "get_niagara_compiled_code",
     "get_niagara_particle_attributes",
+    "bake_niagara_system",
     # Viewport
     "get_viewport_screenshot",
     "set_viewport_camera",
     "get_viewport_camera",
     # Editor
+    "get_editor_context",
+    "get_open_asset_editors",
+    "get_selected_assets",
+    "get_selected_actors",
+    "open_asset",
+    "focus_asset_editor",
+    "close_asset_editors",
+    "save_asset",
     "create_level",
     "load_level",
     "save_current_level",

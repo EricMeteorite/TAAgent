@@ -2,10 +2,21 @@
 """Test import workflow with output log capture."""
 
 import json
+import os
 import time
 from pathlib import Path
 
-TEMP_DIR = Path("C:/Users/LK867/AppData/Local/Temp/ue_cli")
+
+
+def _resolve_temp_dir() -> Path:
+    configured_dir = os.environ.get("TAAGENT_UE_CLI_DIR")
+    if configured_dir:
+        return Path(configured_dir)
+
+    return Path(os.environ.get("TEMP", ".")) / "ue_cli"
+
+
+TEMP_DIR = _resolve_temp_dir()
 COMMAND_FILE = TEMP_DIR / "command.json"
 RESULT_FILE = TEMP_DIR / "result.json"
 

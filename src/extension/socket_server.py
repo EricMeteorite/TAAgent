@@ -8,11 +8,18 @@ import os
 import traceback
 import tempfile
 
-from PySide2.QtCore import QObject, QTimer
+try:
+    from PySide2.QtCore import QObject, QTimer
+except ImportError:  # pragma: no cover - depends on RenderDoc's embedded Python
+    QObject = object
+    QTimer = None
 
 
 # IPC directory
-IPC_DIR = os.path.join(tempfile.gettempdir(), "renderdoc_mcp")
+IPC_DIR = os.environ.get(
+    "RENDERDOC_MCP_IPC_DIR",
+    os.path.join(tempfile.gettempdir(), "renderdoc_mcp"),
+)
 REQUEST_FILE = os.path.join(IPC_DIR, "request.json")
 RESPONSE_FILE = os.path.join(IPC_DIR, "response.json")
 LOCK_FILE = os.path.join(IPC_DIR, "lock")
@@ -22,6 +29,11 @@ class MCPBridgeServer(QObject):
     """File-based IPC server for MCP bridge communication"""
 
     def __init__(self, host, port, handler, parent=None):
+        if QTimer is None:
+            raise RuntimeError(
+                "PySide2 is required to run the RenderDoc MCP bridge server. "
+                "Import succeeded, but the server can only run inside a PySide2-enabled environment."
+            )
         super(MCPBridgeServer, self).__init__(parent)
         self.handler = handler
         self._timer = None

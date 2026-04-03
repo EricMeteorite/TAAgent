@@ -6,7 +6,8 @@ This version automatically reloads when the script file changes.
 To use:
 1. Open Unreal Editor
 2. Open Python Console
-3. Run: exec(open(r"D:/CodeBuddy/rendering-mcp/unreal/agent-harness/ue_cli_listener_auto.py").read())
+3. Run this file from your local TAAgent checkout, for example:
+   exec(open(r"D:/ABSOLUTE/PATH/TO/TAAgent/unreal/agent-harness/ue_cli_listener_auto.py").read())
 4. Run: start_ue_cli()
 
 The listener will auto-reload when you save changes to ue_cli_listener.py
@@ -18,11 +19,26 @@ import os
 import time
 from pathlib import Path
 
+
+def _resolve_listener_file() -> Path:
+    configured = os.environ.get("TAAGENT_UE_LISTENER_FILE")
+    if configured:
+        return Path(configured)
+
+    current_file = globals().get("__file__")
+    if current_file:
+        return Path(current_file).resolve().with_name("ue_cli_listener.py")
+
+    return Path.cwd() / "ue_cli_listener.py"
+
+
 # Configuration
-TEMP_DIR = Path(os.environ.get("TEMP", "/tmp")) / "ue_cli"
+TEMP_DIR = Path(
+    os.environ.get("UE_CLI_TEMP_DIR", str(Path(os.environ.get("TEMP", "/tmp")) / "ue_cli"))
+)
 COMMAND_FILE = TEMP_DIR / "command.json"
 RESULT_FILE = TEMP_DIR / "result.json"
-LISTENER_FILE = Path(r"D:/CodeBuddy/rendering-mcp/unreal/agent-harness/ue_cli_listener.py")
+LISTENER_FILE = _resolve_listener_file()
 
 # Ensure temp directory exists
 TEMP_DIR.mkdir(parents=True, exist_ok=True)

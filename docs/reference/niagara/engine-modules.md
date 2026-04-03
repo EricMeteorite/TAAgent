@@ -1,6 +1,6 @@
 # UE5.7 Niagara 引擎模块参考
 
-本文档整理自 `E:\UE\UE_5.7\Engine\Plugins\FX\Niagara\Content\Modules\`
+本文档整理自本地 UE 源码目录中的 `Engine/Plugins/FX/Niagara/Content/Modules/`
 
 模块路径格式：`/Niagara/Modules/<Category>/<SubCategory>/<ModuleName>`
 

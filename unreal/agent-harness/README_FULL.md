@@ -34,7 +34,7 @@ pip install -e .
 
 ```python
 # 完整版（推荐）
-exec(open(r"D:/CodeBuddy/rendering-mcp/unreal/agent-harness/ue_cli_listener_full_auto.py").read())
+exec(open(r"D:/ABSOLUTE/PATH/TO/TAAgent/unreal/agent-harness/ue_cli_listener_full_auto.py").read())
 start_ue_cli()
 ```
 

@@ -50,23 +50,12 @@ public class UnrealMCP : ModuleRules
 			}
 		);
 		
-		// UE 5.7+ Stateless Niagara support - add Internal include paths
-		// NiagaraStatelessSimulationShader.h is in NiagaraShader/Internal/Stateless/
-		string NiagaraShaderPath = System.IO.Path.Combine(ModuleDirectory, "..", "..", "..", "..", "..", "..", "Engine", "Plugins", "FX", "Niagara", "Source", "NiagaraShader");
-		if (!System.IO.Directory.Exists(NiagaraShaderPath))
-		{
-			NiagaraShaderPath = "E:/UE/UE_5.7/Engine/Plugins/FX/Niagara/Source/NiagaraShader";
-		}
-		string NiagaraPath = System.IO.Path.Combine(ModuleDirectory, "..", "..", "..", "..", "..", "..", "Engine", "Plugins", "FX", "Niagara", "Source", "Niagara");
-		if (!System.IO.Directory.Exists(NiagaraPath))
-		{
-			NiagaraPath = "E:/UE/UE_5.7/Engine/Plugins/FX/Niagara/Source/Niagara";
-		}
-		string NiagaraEditorPath = System.IO.Path.Combine(ModuleDirectory, "..", "..", "..", "..", "..", "..", "Engine", "Plugins", "FX", "Niagara", "Source", "NiagaraEditor");
-		if (!System.IO.Directory.Exists(NiagaraEditorPath))
-		{
-			NiagaraEditorPath = "E:/UE/UE_5.7/Engine/Plugins/FX/Niagara/Source/NiagaraEditor";
-		}
+		// UE 5.7+ Stateless Niagara support - add Internal include paths from the
+		// actual engine selected by UBT instead of guessing from the plugin location.
+		string EnginePluginsPath = System.IO.Path.Combine(EngineDirectory, "Plugins", "FX", "Niagara", "Source");
+		string NiagaraShaderPath = System.IO.Path.Combine(EnginePluginsPath, "NiagaraShader");
+		string NiagaraPath = System.IO.Path.Combine(EnginePluginsPath, "Niagara");
+		string NiagaraEditorPath = System.IO.Path.Combine(EnginePluginsPath, "NiagaraEditor");
 		
 		// Add Internal include paths for Stateless API
 		if (System.IO.Directory.Exists(System.IO.Path.Combine(NiagaraShaderPath, "Internal")))
@@ -81,6 +70,10 @@ public class UnrealMCP : ModuleRules
 		if (System.IO.Directory.Exists(System.IO.Path.Combine(NiagaraEditorPath, "Public")))
 		{
 			PublicIncludePaths.Add(System.IO.Path.Combine(NiagaraEditorPath, "Public"));
+		}
+		if (System.IO.Directory.Exists(System.IO.Path.Combine(NiagaraEditorPath, "Private")))
+		{
+			PrivateIncludePaths.Add(System.IO.Path.Combine(NiagaraEditorPath, "Private"));
 		}
 		
 		PrivateDependencyModuleNames.AddRange(
@@ -98,7 +91,8 @@ public class UnrealMCP : ModuleRules
 				"Landscape",             // For UMaterialExpressionLandscapeLayerBlend
 				"ImageWrapper",          // For image encoding (PNG/JPEG)
 				"LevelEditor",           // For editor viewport access
-				"RenderCore"             // For FlushRenderingCommands
+				"RenderCore",            // For FlushRenderingCommands
+				"AdvancedPreviewScene"   // For transient Niagara bake preview scene
 			}
 		);
 		
@@ -125,4 +119,4 @@ public class UnrealMCP : ModuleRules
 			}
 		);
 	}
-} 
+}

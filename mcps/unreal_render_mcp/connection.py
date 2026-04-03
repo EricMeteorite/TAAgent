@@ -5,6 +5,7 @@ Handles TCP connection to Unreal Engine with automatic retry and reconnection.
 """
 
 import logging
+import os
 import socket
 import json
 import struct
@@ -15,8 +16,8 @@ from typing import Dict, Any, Optional
 logger = logging.getLogger("UnrealRenderMCP")
 
 # Configuration
-UNREAL_HOST = "127.0.0.1"
-UNREAL_PORT = 55557
+UNREAL_HOST = os.environ.get("UE_HOST", "127.0.0.1")
+UNREAL_PORT = int(os.environ.get("UE_PORT", "55557"))
 
 
 class UnrealConnection:

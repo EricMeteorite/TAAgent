@@ -22,6 +22,7 @@
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "EditorAssetLibrary.h"
+#include "AssetSelection.h"
 #include "Commands/EpicUnrealMCPBlueprintCommands.h"
 #include "AssetToolsModule.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -37,10 +38,173 @@
 #include "Engine/StaticMesh.h"
 #include "StaticMeshAttributes.h"
 #include "MeshDescription.h"
+#include "Subsystems/AssetEditorSubsystem.h"
+#include "Framework/Docking/TabManager.h"
+#include "Widgets/Docking/SDockTab.h"
 
 // Niagara System creation support
 #include "NiagaraSystem.h"
 #include "NiagaraSystemFactoryNew.h"
+
+namespace
+{
+    TSharedPtr<FJsonObject> CreateAssetSummary(UObject* Asset)
+    {
+        TSharedPtr<FJsonObject> Json = MakeShared<FJsonObject>();
+        if (!Asset)
+        {
+            Json->SetBoolField(TEXT("valid"), false);
+            return Json;
+        }
+
+        UPackage* Package = Asset->GetOutermost();
+        Json->SetBoolField(TEXT("valid"), true);
+        Json->SetStringField(TEXT("name"), Asset->GetName());
+        Json->SetStringField(TEXT("asset_name"), Asset->GetName());
+        Json->SetStringField(TEXT("asset_path"), Asset->GetPathName());
+        Json->SetStringField(TEXT("package_name"), Package ? Package->GetName() : TEXT(""));
+        Json->SetStringField(TEXT("class_name"), Asset->GetClass()->GetName());
+        Json->SetStringField(TEXT("class_path"), Asset->GetClass()->GetPathName());
+        Json->SetBoolField(TEXT("is_dirty"), Package ? Package->IsDirty() : false);
+        return Json;
+    }
+
+    TSharedPtr<FJsonObject> CreateAssetDataSummary(const FAssetData& AssetData)
+    {
+        TSharedPtr<FJsonObject> Json = MakeShared<FJsonObject>();
+        Json->SetBoolField(TEXT("valid"), AssetData.IsValid());
+        Json->SetStringField(TEXT("name"), AssetData.AssetName.ToString());
+        Json->SetStringField(TEXT("asset_name"), AssetData.AssetName.ToString());
+        Json->SetStringField(TEXT("asset_path"), AssetData.GetSoftObjectPath().ToString());
+        Json->SetStringField(TEXT("package_name"), AssetData.PackageName.ToString());
+        Json->SetStringField(TEXT("class_name"), AssetData.AssetClassPath.GetAssetName().ToString());
+        Json->SetStringField(TEXT("class_path"), AssetData.AssetClassPath.ToString());
+        Json->SetBoolField(TEXT("is_loaded"), AssetData.IsAssetLoaded());
+        return Json;
+    }
+
+    TArray<UObject*> GetAssetsEditedByInstance(UAssetEditorSubsystem* AssetEditorSubsystem, IAssetEditorInstance* Instance)
+    {
+        TArray<UObject*> EditedAssets;
+        if (!AssetEditorSubsystem || !Instance)
+        {
+            return EditedAssets;
+        }
+
+        const TArray<UObject*> OpenAssets = AssetEditorSubsystem->GetAllEditedAssets();
+        for (UObject* Asset : OpenAssets)
+        {
+            if (!Asset)
+            {
+                continue;
+            }
+
+            const TArray<IAssetEditorInstance*> EditorsForAsset = AssetEditorSubsystem->FindEditorsForAsset(Asset);
+            if (EditorsForAsset.Contains(Instance))
+            {
+                EditedAssets.Add(Asset);
+            }
+        }
+
+        return EditedAssets;
+    }
+
+    TSharedPtr<FJsonObject> CreateTabSummary(const TSharedPtr<SDockTab>& Tab)
+    {
+        TSharedPtr<FJsonObject> Json = MakeShared<FJsonObject>();
+        Json->SetBoolField(TEXT("valid"), Tab.IsValid());
+        if (!Tab.IsValid())
+        {
+            return Json;
+        }
+
+        Json->SetStringField(TEXT("label"), Tab->GetTabLabel().ToString());
+        Json->SetStringField(TEXT("tab_id"), Tab->GetLayoutIdentifier().ToString());
+        return Json;
+    }
+
+    TSharedPtr<FJsonObject> CreateEditorInstanceSummary(UAssetEditorSubsystem* AssetEditorSubsystem, IAssetEditorInstance* Instance)
+    {
+        TSharedPtr<FJsonObject> Json = MakeShared<FJsonObject>();
+        Json->SetBoolField(TEXT("valid"), Instance != nullptr);
+        if (!AssetEditorSubsystem || !Instance)
+        {
+            return Json;
+        }
+
+        Json->SetStringField(TEXT("editor_name"), Instance->GetEditorName().ToString());
+        Json->SetStringField(TEXT("asset_type_name"), Instance->GetEditingAssetTypeName().ToString());
+        Json->SetBoolField(TEXT("is_primary_editor"), Instance->IsPrimaryEditor());
+        Json->SetNumberField(TEXT("last_activation_time"), Instance->GetLastActivationTime());
+
+        TArray<TSharedPtr<FJsonValue>> AssetsJson;
+        const TArray<UObject*> EditedAssets = GetAssetsEditedByInstance(AssetEditorSubsystem, Instance);
+        for (UObject* Asset : EditedAssets)
+        {
+            AssetsJson.Add(MakeShared<FJsonValueObject>(CreateAssetSummary(Asset)));
+        }
+        Json->SetArrayField(TEXT("assets"), AssetsJson);
+
+        TSharedPtr<FTabManager> TabManager = Instance->GetAssociatedTabManager();
+        Json->SetBoolField(TEXT("has_tab_manager"), TabManager.IsValid());
+        if (TabManager.IsValid())
+        {
+            Json->SetObjectField(TEXT("major_tab"), CreateTabSummary(FGlobalTabmanager::Get()->GetMajorTabForTabManager(TabManager.ToSharedRef())));
+        }
+
+        return Json;
+    }
+
+    IAssetEditorInstance* FindBestActiveEditor(UAssetEditorSubsystem* AssetEditorSubsystem)
+    {
+        if (!AssetEditorSubsystem)
+        {
+            return nullptr;
+        }
+
+        const TArray<IAssetEditorInstance*> OpenEditors = AssetEditorSubsystem->GetAllOpenEditors();
+        const TSharedPtr<SDockTab> ActiveGlobalTab = FGlobalTabmanager::Get()->GetActiveTab();
+
+        IAssetEditorInstance* BestEditor = nullptr;
+        double BestScore = -1.0;
+
+        for (IAssetEditorInstance* Editor : OpenEditors)
+        {
+            if (!Editor)
+            {
+                continue;
+            }
+
+            double Score = Editor->GetLastActivationTime();
+            TSharedPtr<FTabManager> TabManager = Editor->GetAssociatedTabManager();
+            if (ActiveGlobalTab.IsValid() && TabManager.IsValid())
+            {
+                if (FGlobalTabmanager::Get()->GetMajorTabForTabManager(TabManager.ToSharedRef()) == ActiveGlobalTab)
+                {
+                    Score += 500000.0;
+                }
+            }
+
+            if (!BestEditor || Score > BestScore)
+            {
+                BestEditor = Editor;
+                BestScore = Score;
+            }
+        }
+
+        return BestEditor;
+    }
+
+    UWorld* GetEditorWorld()
+    {
+        if (!GEditor)
+        {
+            return nullptr;
+        }
+
+        return GEditor->GetEditorWorldContext().World();
+    }
+}
 
 FEpicUnrealMCPEditorCommands::FEpicUnrealMCPEditorCommands()
 {
@@ -48,6 +212,39 @@ FEpicUnrealMCPEditorCommands::FEpicUnrealMCPEditorCommands()
 
 TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleCommand(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
 {
+    if (CommandType == TEXT("get_editor_context"))
+    {
+        return HandleGetEditorContext(Params);
+    }
+    else if (CommandType == TEXT("get_open_asset_editors"))
+    {
+        return HandleGetOpenAssetEditors(Params);
+    }
+    else if (CommandType == TEXT("get_selected_assets"))
+    {
+        return HandleGetSelectedAssets(Params);
+    }
+    else if (CommandType == TEXT("get_selected_actors"))
+    {
+        return HandleGetSelectedActors(Params);
+    }
+    else if (CommandType == TEXT("open_asset"))
+    {
+        return HandleOpenAsset(Params);
+    }
+    else if (CommandType == TEXT("focus_asset_editor"))
+    {
+        return HandleFocusAssetEditor(Params);
+    }
+    else if (CommandType == TEXT("close_asset_editors"))
+    {
+        return HandleCloseAssetEditors(Params);
+    }
+    else if (CommandType == TEXT("save_asset"))
+    {
+        return HandleSaveAsset(Params);
+    }
+
     // Actor manipulation commands
     if (CommandType == TEXT("get_actors_in_level"))
     {
@@ -98,6 +295,267 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleCommand(const FStrin
     }
     
     return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown editor command: %s"), *CommandType));
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleGetEditorContext(const TSharedPtr<FJsonObject>& Params)
+{
+    UAssetEditorSubsystem* AssetEditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UAssetEditorSubsystem>() : nullptr;
+    if (!AssetEditorSubsystem)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("AssetEditorSubsystem is unavailable"));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), true);
+
+    UWorld* World = GetEditorWorld();
+    if (World)
+    {
+        ResultObj->SetStringField(TEXT("current_level"), World->GetOutermost()->GetName());
+    }
+
+    ResultObj->SetObjectField(TEXT("active_global_tab"), CreateTabSummary(FGlobalTabmanager::Get()->GetActiveTab()));
+
+    TArray<TSharedPtr<FJsonValue>> SelectedAssetsJson;
+    TArray<FAssetData> SelectedAssets;
+    AssetSelectionUtils::GetSelectedAssets(SelectedAssets);
+    for (const FAssetData& AssetData : SelectedAssets)
+    {
+        SelectedAssetsJson.Add(MakeShared<FJsonValueObject>(CreateAssetDataSummary(AssetData)));
+    }
+    ResultObj->SetArrayField(TEXT("selected_assets"), SelectedAssetsJson);
+    ResultObj->SetNumberField(TEXT("selected_asset_count"), SelectedAssets.Num());
+
+    TArray<TSharedPtr<FJsonValue>> SelectedActorsJson;
+    if (GEditor)
+    {
+        for (FSelectionIterator It(GEditor->GetSelectedActorIterator()); It; ++It)
+        {
+            if (AActor* Actor = Cast<AActor>(*It))
+            {
+                SelectedActorsJson.Add(FEpicUnrealMCPCommonUtils::ActorToJson(Actor));
+            }
+        }
+    }
+    ResultObj->SetArrayField(TEXT("selected_actors"), SelectedActorsJson);
+    ResultObj->SetNumberField(TEXT("selected_actor_count"), SelectedActorsJson.Num());
+
+    TArray<TSharedPtr<FJsonValue>> OpenAssetsJson;
+    const TArray<UObject*> OpenAssets = AssetEditorSubsystem->GetAllEditedAssets();
+    for (UObject* Asset : OpenAssets)
+    {
+        OpenAssetsJson.Add(MakeShared<FJsonValueObject>(CreateAssetSummary(Asset)));
+    }
+    ResultObj->SetArrayField(TEXT("open_assets"), OpenAssetsJson);
+    ResultObj->SetNumberField(TEXT("open_asset_count"), OpenAssets.Num());
+
+    TArray<TSharedPtr<FJsonValue>> OpenEditorsJson;
+    const TArray<IAssetEditorInstance*> OpenEditors = AssetEditorSubsystem->GetAllOpenEditors();
+    for (IAssetEditorInstance* Editor : OpenEditors)
+    {
+        OpenEditorsJson.Add(MakeShared<FJsonValueObject>(CreateEditorInstanceSummary(AssetEditorSubsystem, Editor)));
+    }
+    ResultObj->SetArrayField(TEXT("open_asset_editors"), OpenEditorsJson);
+    ResultObj->SetNumberField(TEXT("open_asset_editor_count"), OpenEditors.Num());
+
+    if (IAssetEditorInstance* ActiveEditor = FindBestActiveEditor(AssetEditorSubsystem))
+    {
+        ResultObj->SetObjectField(TEXT("active_asset_editor"), CreateEditorInstanceSummary(AssetEditorSubsystem, ActiveEditor));
+    }
+
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleGetOpenAssetEditors(const TSharedPtr<FJsonObject>& Params)
+{
+    UAssetEditorSubsystem* AssetEditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UAssetEditorSubsystem>() : nullptr;
+    if (!AssetEditorSubsystem)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("AssetEditorSubsystem is unavailable"));
+    }
+
+    TArray<TSharedPtr<FJsonValue>> EditorsJson;
+    const TArray<IAssetEditorInstance*> OpenEditors = AssetEditorSubsystem->GetAllOpenEditors();
+    for (IAssetEditorInstance* Editor : OpenEditors)
+    {
+        EditorsJson.Add(MakeShared<FJsonValueObject>(CreateEditorInstanceSummary(AssetEditorSubsystem, Editor)));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), true);
+    ResultObj->SetArrayField(TEXT("open_asset_editors"), EditorsJson);
+    ResultObj->SetNumberField(TEXT("count"), OpenEditors.Num());
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleGetSelectedAssets(const TSharedPtr<FJsonObject>& Params)
+{
+    TArray<FAssetData> SelectedAssets;
+    AssetSelectionUtils::GetSelectedAssets(SelectedAssets);
+
+    TArray<TSharedPtr<FJsonValue>> AssetsJson;
+    for (const FAssetData& AssetData : SelectedAssets)
+    {
+        AssetsJson.Add(MakeShared<FJsonValueObject>(CreateAssetDataSummary(AssetData)));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), true);
+    ResultObj->SetArrayField(TEXT("selected_assets"), AssetsJson);
+    ResultObj->SetNumberField(TEXT("count"), SelectedAssets.Num());
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleGetSelectedActors(const TSharedPtr<FJsonObject>& Params)
+{
+    TArray<TSharedPtr<FJsonValue>> ActorsJson;
+    if (GEditor)
+    {
+        for (FSelectionIterator It(GEditor->GetSelectedActorIterator()); It; ++It)
+        {
+            if (AActor* Actor = Cast<AActor>(*It))
+            {
+                ActorsJson.Add(FEpicUnrealMCPCommonUtils::ActorToJson(Actor));
+            }
+        }
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), true);
+    ResultObj->SetArrayField(TEXT("selected_actors"), ActorsJson);
+    ResultObj->SetNumberField(TEXT("count"), ActorsJson.Num());
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleOpenAsset(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath;
+    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'asset_path' parameter"));
+    }
+
+    UObject* Asset = StaticLoadObject(UObject::StaticClass(), nullptr, *AssetPath);
+    if (!Asset)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load asset: %s"), *AssetPath));
+    }
+
+    UAssetEditorSubsystem* AssetEditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UAssetEditorSubsystem>() : nullptr;
+    if (!AssetEditorSubsystem)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("AssetEditorSubsystem is unavailable"));
+    }
+
+    const bool bOpened = AssetEditorSubsystem->OpenEditorForAsset(Asset);
+    if (!bOpened)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to open asset editor for: %s"), *AssetPath));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), true);
+    ResultObj->SetObjectField(TEXT("asset"), CreateAssetSummary(Asset));
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleFocusAssetEditor(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath;
+    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'asset_path' parameter"));
+    }
+
+    UObject* Asset = StaticLoadObject(UObject::StaticClass(), nullptr, *AssetPath);
+    if (!Asset)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load asset: %s"), *AssetPath));
+    }
+
+    UAssetEditorSubsystem* AssetEditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UAssetEditorSubsystem>() : nullptr;
+    if (!AssetEditorSubsystem)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("AssetEditorSubsystem is unavailable"));
+    }
+
+    IAssetEditorInstance* EditorInstance = AssetEditorSubsystem->FindEditorForAsset(Asset, true);
+    if (!EditorInstance)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Asset editor is not open for: %s"), *AssetPath));
+    }
+
+    EditorInstance->FocusWindow(Asset);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), true);
+    ResultObj->SetObjectField(TEXT("editor"), CreateEditorInstanceSummary(AssetEditorSubsystem, EditorInstance));
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleCloseAssetEditors(const TSharedPtr<FJsonObject>& Params)
+{
+    UAssetEditorSubsystem* AssetEditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UAssetEditorSubsystem>() : nullptr;
+    if (!AssetEditorSubsystem)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("AssetEditorSubsystem is unavailable"));
+    }
+
+    bool bCloseAll = false;
+    Params->TryGetBoolField(TEXT("close_all"), bCloseAll);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), true);
+
+    if (bCloseAll)
+    {
+        ResultObj->SetBoolField(TEXT("closed_all"), AssetEditorSubsystem->CloseAllAssetEditors());
+        return ResultObj;
+    }
+
+    FString AssetPath;
+    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'asset_path' parameter or set 'close_all' to true"));
+    }
+
+    UObject* Asset = StaticLoadObject(UObject::StaticClass(), nullptr, *AssetPath);
+    if (!Asset)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load asset: %s"), *AssetPath));
+    }
+
+    const int32 ClosedCount = AssetEditorSubsystem->CloseAllEditorsForAsset(Asset);
+    ResultObj->SetStringField(TEXT("asset_path"), AssetPath);
+    ResultObj->SetNumberField(TEXT("closed_editor_count"), ClosedCount);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleSaveAsset(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath;
+    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'asset_path' parameter"));
+    }
+
+    UObject* Asset = StaticLoadObject(UObject::StaticClass(), nullptr, *AssetPath);
+    if (!Asset)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load asset: %s"), *AssetPath));
+    }
+
+    const bool bSaved = UEditorAssetLibrary::SaveAsset(AssetPath, false);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), bSaved);
+    ResultObj->SetStringField(TEXT("asset_path"), AssetPath);
+    ResultObj->SetObjectField(TEXT("asset"), CreateAssetSummary(Asset));
+    if (!bSaved)
+    {
+        ResultObj->SetStringField(TEXT("error"), TEXT("Failed to save asset"));
+    }
+    return ResultObj;
 }
 
 TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleGetActorsInLevel(const TSharedPtr<FJsonObject>& Params)

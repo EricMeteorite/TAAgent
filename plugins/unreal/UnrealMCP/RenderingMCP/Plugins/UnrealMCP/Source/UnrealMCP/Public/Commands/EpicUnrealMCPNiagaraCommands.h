@@ -114,6 +114,14 @@ private:
      */
     TSharedPtr<FJsonObject> HandleGetNiagaraParticleAttributes(const TSharedPtr<FJsonObject>& Params);
     
+    /**
+     * Bake a Niagara System to frame sequence images without modifying the asset on disk.
+     *
+     * Captures beauty from Final Tone Curve and alpha from SceneColor HDR, then merges
+     * them into a final RGBA frame sequence.
+     */
+    TSharedPtr<FJsonObject> HandleBakeNiagaraSystem(const TSharedPtr<FJsonObject>& Params);
+
     // ============================================================================
     // Helper Functions - Graph
     // ============================================================================

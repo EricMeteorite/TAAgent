@@ -11,8 +11,11 @@ import uuid
 from typing import Any
 
 
-# IPC directory (must match renderdoc_extension/socket_server.py)
-IPC_DIR = os.path.join(tempfile.gettempdir(), "renderdoc_mcp")
+# IPC directory (must match src/extension/socket_server.py)
+IPC_DIR = os.environ.get(
+    "RENDERDOC_MCP_IPC_DIR",
+    os.path.join(tempfile.gettempdir(), "renderdoc_mcp"),
+)
 REQUEST_FILE = os.path.join(IPC_DIR, "request.json")
 RESPONSE_FILE = os.path.join(IPC_DIR, "response.json")
 LOCK_FILE = os.path.join(IPC_DIR, "lock")

@@ -18,7 +18,8 @@ Features:
 To use:
 1. Open Unreal Editor
 2. Open Python Console (Window -> Developer Tools -> Python Console)
-3. Run: exec(open(r"D:/CodeBuddy/rendering-mcp/unreal/agent-harness/ue_cli_listener_full.py").read())
+3. Run this file from your local TAAgent checkout, for example:
+   exec(open(r"D:/ABSOLUTE/PATH/TO/TAAgent/unreal/agent-harness/ue_cli_listener_full.py").read())
 4. Run: start_ue_cli()
 """
 
@@ -29,7 +30,9 @@ import time
 from pathlib import Path
 
 # Configuration
-TEMP_DIR = Path(os.environ.get("TEMP", "/tmp")) / "ue_cli"
+TEMP_DIR = Path(
+    os.environ.get("UE_CLI_TEMP_DIR", str(Path(os.environ.get("TEMP", "/tmp")) / "ue_cli"))
+)
 COMMAND_FILE = TEMP_DIR / "command.json"
 RESULT_FILE = TEMP_DIR / "result.json"
 
@@ -432,6 +435,14 @@ def get_level_info(params: dict) -> dict:
         world = unreal.EditorLevelLibrary.get_editor_world()
         level_name = world.get_name() if world else "Unknown"
         actors = unreal.EditorLevelLibrary.get_all_level_actors()
+        world_partition = False
+
+        if world:
+            world_partition_attr = getattr(world, "is_world_partitioned", None)
+            if callable(world_partition_attr):
+                world_partition = bool(world_partition_attr())
+            elif world_partition_attr is not None:
+                world_partition = bool(world_partition_attr)
         
         return {
             "success": True,
@@ -439,7 +450,7 @@ def get_level_info(params: dict) -> dict:
                 "name": level_name,
                 "path": world.get_path_name() if world else "",
                 "actor_count": len(actors),
-                "world_partition": world.is_world_partitioned if world else False
+                "world_partition": world_partition
             }
         }
     except Exception as e:
@@ -1541,7 +1552,7 @@ COMMANDS = {
 def write_result(result: dict):
     """Write result to result file."""
     try:
-        with open(RESULT_FILE, "w") as f:
+        with open(RESULT_FILE, "w", encoding="utf-8") as f:
             json.dump(result, f, indent=2)
     except Exception as e:
         print(f"[UE CLI] Error writing result: {e}")
@@ -1553,7 +1564,8 @@ def process_command():
         if not COMMAND_FILE.exists():
             return False
         
-        with open(COMMAND_FILE, "r") as f:
+        # Tolerate UTF-8 files written by PowerShell, which may include a BOM.
+        with open(COMMAND_FILE, "r", encoding="utf-8-sig") as f:
             command = json.load(f)
         
         cmd_type = command.get("type")

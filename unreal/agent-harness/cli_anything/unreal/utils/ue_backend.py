@@ -19,17 +19,15 @@ from typing import Optional, Dict, Any, List
 from pathlib import Path
 
 # Default paths for file-based communication
-DEFAULT_TEMP_DIR = Path(tempfile.gettempdir()) / "ue_cli"
+DEFAULT_TEMP_DIR = Path(
+    os.environ.get("UE_CLI_TEMP_DIR", str(Path(tempfile.gettempdir()) / "ue_cli"))
+)
 COMMAND_FILE = DEFAULT_TEMP_DIR / "command.json"
 RESULT_FILE = DEFAULT_TEMP_DIR / "result.json"
 LOCK_FILE = DEFAULT_TEMP_DIR / "lock"
 
 # UE Editor executable paths (common locations)
 UE_EDITOR_PATHS = [
-    r"E:\UE\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe",
-    r"E:\UE\UE_5.6\Engine\Binaries\Win64\UnrealEditor.exe",
-    r"E:\UE\UE_5.5\Engine\Binaries\Win64\UnrealEditor.exe",
-    r"E:\UE\UE_5.4\Engine\Binaries\Win64\UnrealEditor.exe",
     r"C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe",
     r"C:\Program Files\Epic Games\UE_5.6\Engine\Binaries\Win64\UnrealEditor.exe",
     r"C:\Program Files\Epic Games\UE_5.5\Engine\Binaries\Win64\UnrealEditor.exe",

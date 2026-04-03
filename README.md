@@ -41,36 +41,6 @@ TA Agent 不只是被动响应工具调用，而是具备：
 ```
 TA Agent
 |
-├── .codebuddy/                   # Agent 核心
-│   ├── agents/                   # Agent 定义
-│   │   └── TA-Agent.md           # TA 身份与能力定义
-│   │
-│   ├── rules/                    # 项目规则 (始终加载)
-│   │   ├── mcp-development.mdc   # MCP 开发指南
-│   │   └── skills-guidelines.mdc # skill 开发指南
-│   │
-│   ├── skills/                   # 技能模块 (按需加载)
-│   │   ├── renderdoc-reverse-engineering/   # GPU 捕获逆向分析
-│   │   │   ├── SKILL.md
-│   │   │   └── references/       # MCP工具参考、顶点格式
-│   │   │
-│   │   ├── ue-material-workflow/            # UE 材质系统
-│   │   │   ├── SKILL.md
-│   │   │   └── references/       # 节点类型、材质函数
-│   │   │
-│   │   ├── ue-niagara-workflow/             # Niagara 粒子系统
-│   │   │   ├── SKILL.md
-│   │   │   └── references/       # 模块列表、架构原理
-│   │   │
-│   │   └── ue-lookdev-workflow/             # 物理灯光与材质校准
-│   │       ├── SKILL.md
-│   │       └── references/       # 灯光参数、HDRI、LookDev工具
-│   │
-│   └── knowledge/                # 领域知识
-│       └── mcp-tools/            # MCP 工具详细文档
-│           ├── renderdoc-mcp.md
-│           └── unreal-render-mcp.md
-│
 ├── mcps/                         # MCP Server
 │   ├── renderdoc_mcp/            # RenderDoc 分析 MCP
 │   │   ├── mcp_server/           # 服务端实现
@@ -83,12 +53,19 @@ TA Agent
 │
 ├── src/extension/                # RenderDoc Python 扩展
 │
+├── docs/                         # 用户文档与技术参考
+│   ├── DEPLOYMENT_ZH-CN.md       # 独立部署与使用手册
+│   └── reference/                # 从旧工作流迁移出的项目参考资料
+│
 ├── plugins/unreal/               # UE C++ 插件
 │   └── UnrealMCP/RenderingMCP/   # UE 项目
-│       └── Plugins/UnrealMCP/    # MCP 插件源码
+│       └── Plugins/
+│           ├── UnrealMCP/        # MCP 插件源码
+│           └── AssetValidation/  # Niagara 验证与 Overdraw 分析插件
 │
 ├── config/                       # 配置模板
-├── build_logs/                   # 编译日志
+├── unreal/                       # Unreal CLI harness 与辅助脚本
+├── .taagent-local/               # 本地自包含运行时（生成）
 └── tools/                        # 辅助工具
 ```
 
@@ -122,20 +99,20 @@ UE 资产与场景操作工具。
 | **Niagara** | `get_niagara_emitter`, `get_niagara_graph`, `update_niagara_emitter`, `update_niagara_graph` |
 | **视口** | `get_viewport_screenshot` |
 
-> 详细文档见 `.codebuddy/knowledge/mcp-tools/`
+> 详细文档见 `docs/reference/mcp-tools/`
 
 ---
 
-## Skills 概览
+## 技术参考主题
 
-| Skill | 用途 | 触发场景 |
-|-------|------|----------|
-| **renderdoc-reverse-engineering** | GPU 捕获逆向分析 | 分析渲染技术、提取资产、复现效果 |
-| **ue-material-workflow** | UE 材质系统操作 | 创建/修改材质、分析材质图 |
-| **ue-niagara-workflow** | Niagara 粒子系统 | 创建/优化粒子效果、Stateless 转换 |
-| **ue-lookdev-workflow** | 物理灯光与材质校准 | HDRI 处理、灯光匹配、材质校准 |
+| 主题 | 用途 | 适用场景 |
+|------|------|----------|
+| **renderdoc** | GPU 捕获逆向分析 | 分析渲染技术、提取资产、复现效果 |
+| **materials** | UE 材质系统操作 | 创建/修改材质、分析材质图 |
+| **niagara** | Niagara 粒子系统 | 创建/优化粒子效果、Stateless 转换 |
+| **lookdev** | 物理灯光与材质校准 | HDRI 处理、灯光匹配、材质校准 |
 
-> 详细文档见 `.codebuddy/skills/*/SKILL.md`
+> 详细文档见 `docs/reference/`
 
 ---
 
@@ -152,19 +129,17 @@ UE 资产与场景操作工具。
 ### 首次设置
 
 ```bash
-# 1. 安装 Python 依赖
-pip install -e .
+# 推荐方式：运行自包含本地部署脚本
+powershell -ExecutionPolicy Bypass -File .\tools\setup_local.ps1
 
-# 2. 初始化 RenderDoc 扩展
-python src/scripts/renderdoc/install_extension.py
-
-# 3. 打开 UE 项目（让引擎自动编译插件）
-# plugins/unreal/UnrealMCP/RenderingMCP/RenderingMCP.uproject
+# 或直接双击仓库根目录下的 TAAgent.bat
 ```
+
+这会在 `.taagent-local/` 下创建本地虚拟环境、缓存、IPC 目录和 MCP 配置，不污染系统 Python 与系统级配置。
 
 ### MCP 配置
 
-**CodeBuddy / Claude Code** (`~/.codebuddy/mcp.json`):
+任意支持自定义 MCP Server 的客户端都可以使用下面的配置结构：
 
 ```json
 {
@@ -172,16 +147,24 @@ python src/scripts/renderdoc/install_extension.py
     "renderdoc": {
       "command": "python",
       "args": ["-m", "mcp_server.server"],
-      "cwd": "D:/CodeBuddy/rendering-mcp/mcps/renderdoc_mcp"
+      "cwd": "D:/ABSOLUTE/PATH/TO/TAAgent/mcps/renderdoc_mcp"
     },
     "unreal-render": {
       "command": "python",
       "args": ["server.py"],
-      "cwd": "D:/CodeBuddy/rendering-mcp/mcps/unreal_render_mcp"
+      "cwd": "D:/ABSOLUTE/PATH/TO/TAAgent/mcps/unreal_render_mcp"
     }
   }
 }
 ```
+
+也可以直接运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\generate_local_mcp_config.ps1
+```
+
+它会基于当前仓库路径生成本地可用的 MCP 配置，输出到 `.taagent-local/config/mcp_config.local.json`。
 
 ### 开发提醒
 
@@ -196,10 +179,14 @@ python src/scripts/renderdoc/install_extension.py
 ## 编译
 
 ```bash
-# Windows
-Build.bat          # 或 Build.ps1
+# Windows 推荐入口
+TAAgent.bat
 
-# 日志保存在 build_logs/ 目录
+# 或直接运行 tools/ 下的 PowerShell 脚本：
+# tools/setup_local.ps1
+# tools/open_renderdoc_local.ps1
+# tools/start_renderdoc_mcp.ps1
+# tools/start_unreal_mcp.ps1
 ```
 
 ---

@@ -61,6 +61,7 @@ plugins/unreal/UnrealMCP/RenderingMCP/Plugins/UnrealMCP/Package/
 # ============================================
 .idea/
 .vscode/
+.codebuddy/
 *.swp
 *.swo
 
@@ -85,3 +86,11 @@ $null
 *.tmp
 *.bak
 *~
+# Test and generated outputs
+.pytest_cache/
+output/
+# ============================================
+# TAAgent local runtime
+# ============================================
+.taagent-local/
+# End of TAAgent ignore rules

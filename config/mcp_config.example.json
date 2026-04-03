@@ -3,7 +3,7 @@
     "renderdoc": {
       "command": "python",
       "args": ["-m", "mcp_server.server"],
-      "cwd": "D:/CodeBuddy/rendering-mcp/src/servers/renderdoc_mcp",
+      "cwd": "D:/ABSOLUTE/PATH/TO/TAAgent/mcps/renderdoc_mcp",
       "env": {
         "RENDERDOC_PATH": "C:/Program Files/RenderDoc"
       }
@@ -11,7 +11,7 @@
     "unreal-render": {
       "command": "python",
       "args": ["server.py"],
-      "cwd": "D:/CodeBuddy/rendering-mcp/src/servers/unreal_render_mcp",
+      "cwd": "D:/ABSOLUTE/PATH/TO/TAAgent/mcps/unreal_render_mcp",
       "env": {
         "UE_HOST": "127.0.0.1",
         "UE_PORT": "55557"

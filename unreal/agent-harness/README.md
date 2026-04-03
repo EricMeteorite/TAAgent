@@ -17,7 +17,8 @@ In Unreal Editor:
 1. Open **Python Console** (Window -> Developer Tools -> Python Console)
 2. Run:
 ```python
-exec(open(r"D:/CodeBuddy/rendering-mcp/unreal/agent-harness/ue_cli_listener_auto.py").read())
+# Replace the path below with your local TAAgent path
+exec(open(r"D:/ABSOLUTE/PATH/TO/TAAgent/unreal/agent-harness/ue_cli_listener_auto.py").read())
 start_ue_cli()
 ```
 
@@ -25,7 +26,7 @@ This version **auto-reloads** when you modify `ue_cli_listener.py` - no need to 
 
 Or use the manual version (no auto-reload):
 ```python
-exec(open(r"D:/CodeBuddy/rendering-mcp/unreal/agent-harness/ue_cli_listener.py").read())
+exec(open(r"D:/ABSOLUTE/PATH/TO/TAAgent/unreal/agent-harness/ue_cli_listener.py").read())
 start_ue_cli()
 ```
 
@@ -92,7 +93,7 @@ ue-cli repl
 
 The CLI uses a **file-based communication** mechanism:
 
-1. CLI writes commands to `C:\Users\<user>\AppData\Local\Temp\ue_cli\command.json`
+1. CLI writes commands to `<temp>/ue_cli/command.json`
 2. UE Python listener polls and executes commands
 3. UE writes results to `result.json`
 4. CLI reads results
