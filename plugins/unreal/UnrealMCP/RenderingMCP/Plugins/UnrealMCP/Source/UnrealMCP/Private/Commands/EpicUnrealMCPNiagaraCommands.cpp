@@ -290,6 +290,46 @@ static FString NormalizeBakeFileExtension(const FString& FileExtension)
     return FileExtension.StartsWith(TEXT(".")) ? FileExtension : TEXT(".") + FileExtension;
 }
 
+static void CleanupExistingBakeSequence(const FString& OutputDir, const FString& OutputPrefix)
+{
+    TArray<FString> ExistingFiles;
+    const FString SearchPattern = FPaths::Combine(OutputDir, OutputPrefix + TEXT("_*.*"));
+    IFileManager::Get().FindFiles(ExistingFiles, *SearchPattern, true, false);
+
+    const FString ExpectedPrefix = OutputPrefix + TEXT("_");
+    for (const FString& ExistingFile : ExistingFiles)
+    {
+        const FString BaseFileName = FPaths::GetBaseFilename(ExistingFile);
+        if (!BaseFileName.StartsWith(ExpectedPrefix))
+        {
+            continue;
+        }
+
+        const FString FrameSuffix = BaseFileName.RightChop(ExpectedPrefix.Len());
+        if (FrameSuffix.IsEmpty())
+        {
+            continue;
+        }
+
+        bool bAllDigits = true;
+        for (TCHAR Character : FrameSuffix)
+        {
+            if (!FChar::IsDigit(Character))
+            {
+                bAllDigits = false;
+                break;
+            }
+        }
+
+        if (!bAllDigits)
+        {
+            continue;
+        }
+
+        IFileManager::Get().Delete(*FPaths::Combine(OutputDir, ExistingFile), false, true, true);
+    }
+}
+
 static FIntPoint ResolveBakeFrameSize(UNiagaraBakerSettings* BakerSettings, int32 RequestedWidth, int32 RequestedHeight)
 {
     int32 Width = RequestedWidth;
@@ -629,6 +669,8 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleBakeNiagaraSystem(c
     const int32 TotalFrames = FramesX * FramesY;
     const float FrameDeltaSeconds = DurationSeconds / static_cast<float>(TotalFrames);
     const FString OutputPrefix = RequestedOutputPrefix.IsEmpty() ? NiagaraSystem->GetName() : RequestedOutputPrefix;
+
+    CleanupExistingBakeSequence(OutputDir, OutputPrefix);
 
     FScopedBakerSettingsRestore ScopedRestore(BakerSettings);
     BakerSettings->StartSeconds = StartSeconds;

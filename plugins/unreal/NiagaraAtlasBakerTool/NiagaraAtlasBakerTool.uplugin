@@ -1,0 +1,30 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0.0",
+  "FriendlyName": "Niagara Atlas Baker Tool",
+  "Description": "Standalone artist-facing Niagara atlas baker. Select a Niagara System, choose bake options, and generate an atlas texture asset directly in Unreal.",
+  "Category": "Art Tools",
+  "CreatedBy": "TAAgent",
+  "CreatedByURL": "https://github.com",
+  "CanContainContent": false,
+  "IsBetaVersion": false,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "NiagaraAtlasBakerTool",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "Niagara",
+      "Enabled": true
+    },
+    {
+      "Name": "EditorScriptingUtilities",
+      "Enabled": true
+    }
+  ]
+}
