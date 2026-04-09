@@ -3,6 +3,8 @@
 #include "Commands/EpicUnrealMCPMaterialCommands.h"
 #include "Commands/EpicUnrealMCPCommonUtils.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialFunction.h"
 #include "Materials/MaterialExpression.h"
@@ -96,6 +98,504 @@
 #include "Misc/Paths.h"
 #include "UObject/Package.h"
 
+namespace
+{
+FString NormalizeMaterialAssetPath(const FString& AssetPath)
+{
+    return AssetPath.StartsWith(TEXT("/")) ? AssetPath : FString::Printf(TEXT("/Game/Materials/%s"), *AssetPath);
+}
+
+FString MaterialDomainToString(EMaterialDomain Domain)
+{
+    switch (Domain)
+    {
+    case MD_Surface:
+        return TEXT("Surface");
+    case MD_DeferredDecal:
+        return TEXT("DeferredDecal");
+    case MD_LightFunction:
+        return TEXT("LightFunction");
+    case MD_Volume:
+        return TEXT("Volume");
+    case MD_PostProcess:
+        return TEXT("PostProcess");
+    case MD_UI:
+        return TEXT("UI");
+    case MD_RuntimeVirtualTexture:
+        return TEXT("RuntimeVirtualTexture");
+    default:
+        return FString::Printf(TEXT("Unknown(%d)"), static_cast<int32>(Domain));
+    }
+}
+
+FString BlendableLocationToString(EBlendableLocation Location)
+{
+    switch (Location)
+    {
+    case BL_SceneColorAfterTonemapping:
+        return TEXT("AfterTonemapping");
+    case BL_SceneColorAfterDOF:
+        return TEXT("BeforeTonemapping");
+    case BL_SceneColorBeforeDOF:
+        return TEXT("BeforeTranslucency");
+    case BL_ReplacingTonemapper:
+        return TEXT("ReplacingTonemapper");
+    case BL_SSRInput:
+        return TEXT("SSRInput");
+    default:
+        return FString::Printf(TEXT("Unknown(%d)"), static_cast<int32>(Location));
+    }
+}
+
+FString MaterialParameterAssociationToString(EMaterialParameterAssociation Association)
+{
+    switch (Association)
+    {
+    case EMaterialParameterAssociation::GlobalParameter:
+        return TEXT("Global");
+    case EMaterialParameterAssociation::LayerParameter:
+        return TEXT("Layer");
+    case EMaterialParameterAssociation::BlendParameter:
+        return TEXT("Blend");
+    default:
+        return FString::Printf(TEXT("Unknown(%d)"), static_cast<int32>(Association));
+    }
+}
+
+FString SceneTextureIdToString(ESceneTextureId SceneTextureId)
+{
+    switch (SceneTextureId)
+    {
+    case PPI_SceneColor:
+        return TEXT("SceneColor");
+    case PPI_SceneDepth:
+        return TEXT("SceneDepth");
+    case PPI_DiffuseColor:
+        return TEXT("DiffuseColor");
+    case PPI_SpecularColor:
+        return TEXT("SpecularColor");
+    case PPI_SubsurfaceColor:
+        return TEXT("SubsurfaceColor");
+    case PPI_BaseColor:
+        return TEXT("BaseColor");
+    case PPI_Specular:
+        return TEXT("Specular");
+    case PPI_Metallic:
+        return TEXT("Metallic");
+    case PPI_WorldNormal:
+        return TEXT("WorldNormal");
+    case PPI_SeparateTranslucency:
+        return TEXT("SeparateTranslucency");
+    case PPI_Opacity:
+        return TEXT("Opacity");
+    case PPI_Roughness:
+        return TEXT("Roughness");
+    case PPI_MaterialAO:
+        return TEXT("MaterialAO");
+    case PPI_CustomDepth:
+        return TEXT("CustomDepth");
+    case PPI_PostProcessInput0:
+        return TEXT("PostProcessInput0");
+    case PPI_PostProcessInput1:
+        return TEXT("PostProcessInput1");
+    case PPI_PostProcessInput2:
+        return TEXT("PostProcessInput2");
+    case PPI_PostProcessInput3:
+        return TEXT("PostProcessInput3");
+    case PPI_PostProcessInput4:
+        return TEXT("PostProcessInput4");
+    case PPI_PostProcessInput5:
+        return TEXT("PostProcessInput5");
+    case PPI_PostProcessInput6:
+        return TEXT("PostProcessInput6");
+    case PPI_DecalMask:
+        return TEXT("DecalMask");
+    case PPI_ShadingModelColor:
+        return TEXT("ShadingModelColor");
+    case PPI_AmbientOcclusion:
+        return TEXT("AmbientOcclusion");
+    case PPI_CustomStencil:
+        return TEXT("CustomStencil");
+    case PPI_StoredBaseColor:
+        return TEXT("StoredBaseColor");
+    case PPI_StoredSpecular:
+        return TEXT("StoredSpecular");
+    default:
+        return FString::Printf(TEXT("Unknown(%d)"), static_cast<int32>(SceneTextureId));
+    }
+}
+
+void AddStringArrayField(TSharedPtr<FJsonObject> Target, const FString& FieldName, const TArray<FString>& Values)
+{
+    TArray<TSharedPtr<FJsonValue>> JsonArray;
+    for (const FString& Value : Values)
+    {
+        JsonArray.Add(MakeShared<FJsonValueString>(Value));
+    }
+    Target->SetArrayField(FieldName, JsonArray);
+}
+
+void AddCountMapField(TSharedPtr<FJsonObject> Target, const FString& FieldName, const TMap<FString, int32>& Counts)
+{
+    TSharedPtr<FJsonObject> CountObj = MakeShared<FJsonObject>();
+    for (const TPair<FString, int32>& Pair : Counts)
+    {
+        CountObj->SetNumberField(Pair.Key, Pair.Value);
+    }
+    Target->SetObjectField(FieldName, CountObj);
+}
+
+FString MakeParameterKey(const FMaterialParameterInfo& ParameterInfo)
+{
+    return FString::Printf(TEXT("%s|%s|%d"), *ParameterInfo.Name.ToString(), *MaterialParameterAssociationToString(ParameterInfo.Association), ParameterInfo.Index);
+}
+
+void AppendScalarParameters(UMaterialInterface* MaterialInterface, TArray<TSharedPtr<FJsonValue>>& OutParameters)
+{
+    TArray<FMaterialParameterInfo> ParameterInfos;
+    TArray<FGuid> ParameterIds;
+    MaterialInterface->GetAllScalarParameterInfo(ParameterInfos, ParameterIds);
+
+    TSet<FString> SeenParameters;
+    for (const FMaterialParameterInfo& ParameterInfo : ParameterInfos)
+    {
+        const FString ParameterKey = MakeParameterKey(ParameterInfo);
+        if (SeenParameters.Contains(ParameterKey))
+        {
+            continue;
+        }
+
+        SeenParameters.Add(ParameterKey);
+
+        float Value = 0.0f;
+        if (!MaterialInterface->GetScalarParameterValue(ParameterInfo, Value))
+        {
+            continue;
+        }
+
+        TSharedPtr<FJsonObject> ParameterObj = MakeShared<FJsonObject>();
+        ParameterObj->SetStringField(TEXT("name"), ParameterInfo.Name.ToString());
+        ParameterObj->SetStringField(TEXT("association"), MaterialParameterAssociationToString(ParameterInfo.Association));
+        ParameterObj->SetNumberField(TEXT("index"), ParameterInfo.Index);
+        ParameterObj->SetNumberField(TEXT("value"), Value);
+        OutParameters.Add(MakeShared<FJsonValueObject>(ParameterObj));
+    }
+}
+
+void AppendVectorParameters(UMaterialInterface* MaterialInterface, TArray<TSharedPtr<FJsonValue>>& OutParameters)
+{
+    TArray<FMaterialParameterInfo> ParameterInfos;
+    TArray<FGuid> ParameterIds;
+    MaterialInterface->GetAllVectorParameterInfo(ParameterInfos, ParameterIds);
+
+    TSet<FString> SeenParameters;
+    for (const FMaterialParameterInfo& ParameterInfo : ParameterInfos)
+    {
+        const FString ParameterKey = MakeParameterKey(ParameterInfo);
+        if (SeenParameters.Contains(ParameterKey))
+        {
+            continue;
+        }
+
+        SeenParameters.Add(ParameterKey);
+
+        FLinearColor Value;
+        if (!MaterialInterface->GetVectorParameterValue(ParameterInfo, Value))
+        {
+            continue;
+        }
+
+        TArray<TSharedPtr<FJsonValue>> ValueArray;
+        ValueArray.Add(MakeShared<FJsonValueNumber>(Value.R));
+        ValueArray.Add(MakeShared<FJsonValueNumber>(Value.G));
+        ValueArray.Add(MakeShared<FJsonValueNumber>(Value.B));
+        ValueArray.Add(MakeShared<FJsonValueNumber>(Value.A));
+
+        TSharedPtr<FJsonObject> ParameterObj = MakeShared<FJsonObject>();
+        ParameterObj->SetStringField(TEXT("name"), ParameterInfo.Name.ToString());
+        ParameterObj->SetStringField(TEXT("association"), MaterialParameterAssociationToString(ParameterInfo.Association));
+        ParameterObj->SetNumberField(TEXT("index"), ParameterInfo.Index);
+        ParameterObj->SetArrayField(TEXT("value"), ValueArray);
+        OutParameters.Add(MakeShared<FJsonValueObject>(ParameterObj));
+    }
+}
+
+void AppendTextureParameters(UMaterialInterface* MaterialInterface, TArray<TSharedPtr<FJsonValue>>& OutParameters)
+{
+    TArray<FMaterialParameterInfo> ParameterInfos;
+    TArray<FGuid> ParameterIds;
+    MaterialInterface->GetAllTextureParameterInfo(ParameterInfos, ParameterIds);
+
+    TSet<FString> SeenParameters;
+    for (const FMaterialParameterInfo& ParameterInfo : ParameterInfos)
+    {
+        const FString ParameterKey = MakeParameterKey(ParameterInfo);
+        if (SeenParameters.Contains(ParameterKey))
+        {
+            continue;
+        }
+
+        SeenParameters.Add(ParameterKey);
+
+        UTexture* Value = nullptr;
+        if (!MaterialInterface->GetTextureParameterValue(ParameterInfo, Value))
+        {
+            continue;
+        }
+
+        TSharedPtr<FJsonObject> ParameterObj = MakeShared<FJsonObject>();
+        ParameterObj->SetStringField(TEXT("name"), ParameterInfo.Name.ToString());
+        ParameterObj->SetStringField(TEXT("association"), MaterialParameterAssociationToString(ParameterInfo.Association));
+        ParameterObj->SetNumberField(TEXT("index"), ParameterInfo.Index);
+        ParameterObj->SetStringField(TEXT("value"), Value ? Value->GetPathName() : TEXT(""));
+        OutParameters.Add(MakeShared<FJsonValueObject>(ParameterObj));
+    }
+}
+
+void AppendStaticSwitchParameters(UMaterialInterface* MaterialInterface, TArray<TSharedPtr<FJsonValue>>& OutParameters)
+{
+    TArray<FMaterialParameterInfo> ParameterInfos;
+    TArray<FGuid> ParameterIds;
+    MaterialInterface->GetAllStaticSwitchParameterInfo(ParameterInfos, ParameterIds);
+
+    TSet<FString> SeenParameters;
+    for (const FMaterialParameterInfo& ParameterInfo : ParameterInfos)
+    {
+        const FString ParameterKey = MakeParameterKey(ParameterInfo);
+        if (SeenParameters.Contains(ParameterKey))
+        {
+            continue;
+        }
+
+        SeenParameters.Add(ParameterKey);
+
+        bool bValue = false;
+        FGuid ExpressionGuid;
+        if (!MaterialInterface->GetStaticSwitchParameterValue(ParameterInfo, bValue, ExpressionGuid))
+        {
+            continue;
+        }
+
+        TSharedPtr<FJsonObject> ParameterObj = MakeShared<FJsonObject>();
+        ParameterObj->SetStringField(TEXT("name"), ParameterInfo.Name.ToString());
+        ParameterObj->SetStringField(TEXT("association"), MaterialParameterAssociationToString(ParameterInfo.Association));
+        ParameterObj->SetNumberField(TEXT("index"), ParameterInfo.Index);
+        ParameterObj->SetBoolField(TEXT("value"), bValue);
+        OutParameters.Add(MakeShared<FJsonValueObject>(ParameterObj));
+    }
+}
+
+TSharedPtr<FJsonObject> BuildMaterialAnalysisSummary(UMaterial* Material)
+{
+    TSharedPtr<FJsonObject> SummaryObj = MakeShared<FJsonObject>();
+
+    const TArray<UMaterialExpression*>& Expressions = Material->GetExpressionCollection().Expressions;
+    TMap<FString, int32> SceneTextureUsage;
+    TArray<FString> ReferencedTextures;
+    TArray<FString> MaterialFunctions;
+    TArray<FString> RiskFlags;
+    TSet<FString> UniqueReferencedTextures;
+    TSet<FString> UniqueMaterialFunctions;
+    TSet<FString> BaseParameterNames;
+    TSet<FString> InsideParameterRoots;
+    TArray<FString> DuplicateInsideGroups;
+
+    int32 SceneTextureCount = 0;
+    int32 TextureSampleCount = 0;
+    int32 IfCount = 0;
+    int32 StepCount = 0;
+    int32 SmoothStepCount = 0;
+    int32 MaterialFunctionCount = 0;
+    int32 StaticSwitchCount = 0;
+    int32 CustomNodeCount = 0;
+    int32 SphereMaskCount = 0;
+    int32 DesaturationCount = 0;
+    int32 ScalarParameterCount = 0;
+    int32 VectorParameterCount = 0;
+    int32 TextureParameterCount = 0;
+    int32 StaticBoolParameterCount = 0;
+
+    for (UMaterialExpression* Expression : Expressions)
+    {
+        if (!Expression)
+        {
+            continue;
+        }
+
+        const FString ExpressionClassName = Expression->GetClass()->GetName();
+
+        if (UMaterialExpressionSceneTexture* SceneTexture = Cast<UMaterialExpressionSceneTexture>(Expression))
+        {
+            ++SceneTextureCount;
+            SceneTextureUsage.FindOrAdd(SceneTextureIdToString(SceneTexture->SceneTextureId)) += 1;
+        }
+
+        if (UMaterialExpressionTextureSample* TextureSample = Cast<UMaterialExpressionTextureSample>(Expression))
+        {
+            ++TextureSampleCount;
+            if (TextureSample->Texture)
+            {
+                UniqueReferencedTextures.Add(TextureSample->Texture->GetPathName());
+            }
+        }
+
+        if (UMaterialExpressionTextureObject* TextureObject = Cast<UMaterialExpressionTextureObject>(Expression))
+        {
+            if (TextureObject->Texture)
+            {
+                UniqueReferencedTextures.Add(TextureObject->Texture->GetPathName());
+            }
+        }
+
+        if (UMaterialExpressionMaterialFunctionCall* MaterialFunctionCall = Cast<UMaterialExpressionMaterialFunctionCall>(Expression))
+        {
+            ++MaterialFunctionCount;
+            if (MaterialFunctionCall->MaterialFunction)
+            {
+                UniqueMaterialFunctions.Add(MaterialFunctionCall->MaterialFunction->GetPathName());
+            }
+        }
+
+        if (Cast<UMaterialExpressionIf>(Expression))
+        {
+            ++IfCount;
+        }
+
+        if (Cast<UMaterialExpressionStep>(Expression))
+        {
+            ++StepCount;
+        }
+
+        if (Cast<UMaterialExpressionSmoothStep>(Expression))
+        {
+            ++SmoothStepCount;
+        }
+
+        if (Cast<UMaterialExpressionCustom>(Expression))
+        {
+            ++CustomNodeCount;
+        }
+
+        if (ExpressionClassName.Contains(TEXT("SphereMask")))
+        {
+            ++SphereMaskCount;
+        }
+
+        if (Cast<UMaterialExpressionDesaturation>(Expression))
+        {
+            ++DesaturationCount;
+        }
+
+        if (ExpressionClassName.Contains(TEXT("StaticSwitchParameter")) || Cast<UMaterialExpressionStaticSwitch>(Expression))
+        {
+            ++StaticSwitchCount;
+        }
+
+        FString ParameterName;
+        if (UMaterialExpressionScalarParameter* ScalarParameter = Cast<UMaterialExpressionScalarParameter>(Expression))
+        {
+            ++ScalarParameterCount;
+            ParameterName = ScalarParameter->ParameterName.ToString();
+        }
+        else if (UMaterialExpressionVectorParameter* VectorParameter = Cast<UMaterialExpressionVectorParameter>(Expression))
+        {
+            ++VectorParameterCount;
+            ParameterName = VectorParameter->ParameterName.ToString();
+        }
+        else if (UMaterialExpressionTextureObjectParameter* TextureObjectParameter = Cast<UMaterialExpressionTextureObjectParameter>(Expression))
+        {
+            ++TextureParameterCount;
+            ParameterName = TextureObjectParameter->ParameterName.ToString();
+        }
+        else if (UMaterialExpressionTextureSampleParameter2D* TextureSampleParameter = Cast<UMaterialExpressionTextureSampleParameter2D>(Expression))
+        {
+            ++TextureParameterCount;
+            ParameterName = TextureSampleParameter->ParameterName.ToString();
+        }
+        else if (UMaterialExpressionStaticBoolParameter* StaticBoolParameter = Cast<UMaterialExpressionStaticBoolParameter>(Expression))
+        {
+            ++StaticBoolParameterCount;
+            ParameterName = StaticBoolParameter->ParameterName.ToString();
+        }
+
+        if (!ParameterName.IsEmpty())
+        {
+            if (ParameterName.EndsWith(TEXT("Inside")))
+            {
+                InsideParameterRoots.Add(ParameterName.LeftChop(6));
+            }
+            else
+            {
+                BaseParameterNames.Add(ParameterName);
+            }
+        }
+    }
+
+    for (const FString& TexturePath : UniqueReferencedTextures)
+    {
+        ReferencedTextures.Add(TexturePath);
+    }
+
+    for (const FString& MaterialFunctionPath : UniqueMaterialFunctions)
+    {
+        MaterialFunctions.Add(MaterialFunctionPath);
+    }
+
+    for (const FString& InsideRoot : InsideParameterRoots)
+    {
+        if (BaseParameterNames.Contains(InsideRoot))
+        {
+            DuplicateInsideGroups.Add(InsideRoot);
+        }
+    }
+
+    if (SceneTextureCount >= 12)
+    {
+        RiskFlags.Add(TEXT("High scene texture sample count"));
+    }
+    if (Expressions.Num() >= 120)
+    {
+        RiskFlags.Add(TEXT("Large post process material graph"));
+    }
+    if (DuplicateInsideGroups.Num() > 0)
+    {
+        RiskFlags.Add(TEXT("Duplicate inside/outside parameter groups detected"));
+    }
+    if (MaterialFunctionCount >= 6)
+    {
+        RiskFlags.Add(TEXT("Many material function calls in a fullscreen pass"));
+    }
+    if (IfCount + StepCount + SmoothStepCount >= 10)
+    {
+        RiskFlags.Add(TEXT("Many threshold/branch style operations in a fullscreen pass"));
+    }
+
+    SummaryObj->SetNumberField(TEXT("node_count"), Expressions.Num());
+    SummaryObj->SetNumberField(TEXT("scene_texture_count"), SceneTextureCount);
+    SummaryObj->SetNumberField(TEXT("texture_sample_count"), TextureSampleCount);
+    SummaryObj->SetNumberField(TEXT("material_function_count"), MaterialFunctionCount);
+    SummaryObj->SetNumberField(TEXT("if_count"), IfCount);
+    SummaryObj->SetNumberField(TEXT("step_count"), StepCount);
+    SummaryObj->SetNumberField(TEXT("smooth_step_count"), SmoothStepCount);
+    SummaryObj->SetNumberField(TEXT("custom_node_count"), CustomNodeCount);
+    SummaryObj->SetNumberField(TEXT("static_switch_count"), StaticSwitchCount);
+    SummaryObj->SetNumberField(TEXT("sphere_mask_count"), SphereMaskCount);
+    SummaryObj->SetNumberField(TEXT("desaturation_count"), DesaturationCount);
+    SummaryObj->SetNumberField(TEXT("scalar_parameter_count"), ScalarParameterCount);
+    SummaryObj->SetNumberField(TEXT("vector_parameter_count"), VectorParameterCount);
+    SummaryObj->SetNumberField(TEXT("texture_parameter_count"), TextureParameterCount);
+    SummaryObj->SetNumberField(TEXT("static_bool_parameter_count"), StaticBoolParameterCount);
+
+    AddCountMapField(SummaryObj, TEXT("scene_texture_usage"), SceneTextureUsage);
+    AddStringArrayField(SummaryObj, TEXT("referenced_textures"), ReferencedTextures);
+    AddStringArrayField(SummaryObj, TEXT("material_functions"), MaterialFunctions);
+    AddStringArrayField(SummaryObj, TEXT("duplicate_inside_groups"), DuplicateInsideGroups);
+    AddStringArrayField(SummaryObj, TEXT("risk_flags"), RiskFlags);
+
+    return SummaryObj;
+}
+}
+
 FEpicUnrealMCPMaterialCommands::FEpicUnrealMCPMaterialCommands()
 {
 }
@@ -120,6 +620,10 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPMaterialCommands::HandleCommand(const FStr
     {
         return HandleGetMaterialGraph(Params);
     }
+    else if (CommandType == TEXT("get_material_analysis"))
+    {
+        return HandleGetMaterialAnalysis(Params);
+    }
     else if (CommandType == TEXT("set_material_properties"))
     {
         return HandleSetMaterialProperties(Params);
@@ -132,6 +636,10 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPMaterialCommands::HandleCommand(const FStr
     else if (CommandType == TEXT("set_material_instance_parameter"))
     {
         return HandleSetMaterialInstanceParameter(Params);
+    }
+    else if (CommandType == TEXT("get_material_instance_details"))
+    {
+        return HandleGetMaterialInstanceDetails(Params);
     }
     // Texture operations
     else if (CommandType == TEXT("import_texture"))
@@ -445,6 +953,105 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPMaterialCommands::HandleSetMaterialInstanc
     ResultObj->SetBoolField(TEXT("success"), true);
     ResultObj->SetStringField(TEXT("material_instance_path"), MaterialInstance->GetPathName());
 
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPMaterialCommands::HandleGetMaterialInstanceDetails(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath;
+    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
+    {
+        if (!Params->TryGetStringField(TEXT("material_instance"), AssetPath))
+        {
+            return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'asset_path' or 'material_instance' parameter"));
+        }
+    }
+
+    const FString FullPath = NormalizeMaterialAssetPath(AssetPath);
+    UMaterialInstanceConstant* MaterialInstance = Cast<UMaterialInstanceConstant>(UEditorAssetLibrary::LoadAsset(FullPath));
+    if (!MaterialInstance)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Asset not found or not a MaterialInstanceConstant: %s"), *FullPath));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), true);
+    ResultObj->SetStringField(TEXT("asset_path"), FullPath);
+    ResultObj->SetStringField(TEXT("name"), MaterialInstance->GetName());
+    ResultObj->SetStringField(TEXT("asset_class"), MaterialInstance->GetClass()->GetName());
+
+    if (MaterialInstance->Parent)
+    {
+        ResultObj->SetStringField(TEXT("parent_path"), MaterialInstance->Parent->GetPathName());
+    }
+
+    if (UMaterial* BaseMaterial = MaterialInstance->GetMaterial())
+    {
+        ResultObj->SetStringField(TEXT("base_material_path"), BaseMaterial->GetPathName());
+        ResultObj->SetStringField(TEXT("material_domain"), MaterialDomainToString(BaseMaterial->MaterialDomain));
+        ResultObj->SetStringField(TEXT("blendable_location"), BlendableLocationToString(BaseMaterial->BlendableLocation));
+    }
+
+    TArray<TSharedPtr<FJsonValue>> ScalarParameters;
+    TArray<TSharedPtr<FJsonValue>> VectorParameters;
+    TArray<TSharedPtr<FJsonValue>> TextureParameters;
+    TArray<TSharedPtr<FJsonValue>> StaticSwitchParameters;
+    AppendScalarParameters(MaterialInstance, ScalarParameters);
+    AppendVectorParameters(MaterialInstance, VectorParameters);
+    AppendTextureParameters(MaterialInstance, TextureParameters);
+    AppendStaticSwitchParameters(MaterialInstance, StaticSwitchParameters);
+
+    ResultObj->SetArrayField(TEXT("scalar_parameters"), ScalarParameters);
+    ResultObj->SetArrayField(TEXT("vector_parameters"), VectorParameters);
+    ResultObj->SetArrayField(TEXT("texture_parameters"), TextureParameters);
+    ResultObj->SetArrayField(TEXT("static_switch_parameters"), StaticSwitchParameters);
+    ResultObj->SetNumberField(TEXT("scalar_parameter_count"), ScalarParameters.Num());
+    ResultObj->SetNumberField(TEXT("vector_parameter_count"), VectorParameters.Num());
+    ResultObj->SetNumberField(TEXT("texture_parameter_count"), TextureParameters.Num());
+    ResultObj->SetNumberField(TEXT("static_switch_parameter_count"), StaticSwitchParameters.Num());
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPMaterialCommands::HandleGetMaterialAnalysis(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath;
+    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
+    {
+        if (!Params->TryGetStringField(TEXT("material_name"), AssetPath))
+        {
+            return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'asset_path' or 'material_name' parameter"));
+        }
+    }
+
+    const FString FullPath = NormalizeMaterialAssetPath(AssetPath);
+    UObject* AssetObject = UEditorAssetLibrary::LoadAsset(FullPath);
+    if (!AssetObject)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Asset not found: %s"), *FullPath));
+    }
+
+    UMaterialInterface* MaterialInterface = Cast<UMaterialInterface>(AssetObject);
+    if (!MaterialInterface)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Asset is not a Material or MaterialInstance: %s"), *FullPath));
+    }
+
+    UMaterial* BaseMaterial = MaterialInterface->GetMaterial();
+    if (!BaseMaterial)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to resolve base material for: %s"), *FullPath));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), true);
+    ResultObj->SetStringField(TEXT("requested_asset_path"), FullPath);
+    ResultObj->SetStringField(TEXT("requested_asset_class"), AssetObject->GetClass()->GetName());
+    ResultObj->SetStringField(TEXT("analysis_asset_path"), BaseMaterial->GetPathName());
+    ResultObj->SetStringField(TEXT("analysis_asset_name"), BaseMaterial->GetName());
+    ResultObj->SetStringField(TEXT("material_domain"), MaterialDomainToString(BaseMaterial->MaterialDomain));
+    ResultObj->SetStringField(TEXT("blendable_location"), BlendableLocationToString(BaseMaterial->BlendableLocation));
+    ResultObj->SetNumberField(TEXT("blend_mode"), BaseMaterial->BlendMode);
+    ResultObj->SetObjectField(TEXT("summary"), BuildMaterialAnalysisSummary(BaseMaterial));
     return ResultObj;
 }
 

@@ -82,3 +82,31 @@ def get_material_graph(asset_path: str, save_to: Optional[str] = None) -> Dict[s
         result.update(save_info)
     
     return result
+
+
+@with_unreal_connection
+def get_material_analysis(asset_path: str) -> Dict[str, Any]:
+    """
+    Get optimization-focused material summary for a Material or MaterialInstance.
+
+    Args:
+        asset_path: Material or material instance path.
+
+    Returns:
+        Summary including scene texture counts, parameter counts, and optimization risk flags.
+    """
+    return send_command("get_material_analysis", {"asset_path": asset_path})
+
+
+@with_unreal_connection
+def get_material_instance_details(asset_path: str) -> Dict[str, Any]:
+    """
+    Get resolved parameter values and parent info for a material instance.
+
+    Args:
+        asset_path: Material instance asset path.
+
+    Returns:
+        Parent path, base material path, and resolved scalar/vector/texture/static switch parameters.
+    """
+    return send_command("get_material_instance_details", {"asset_path": asset_path})

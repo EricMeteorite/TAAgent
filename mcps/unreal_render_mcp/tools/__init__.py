@@ -11,6 +11,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from material import (
     build_material_graph,
     get_material_graph,
+    get_material_analysis,
+    get_material_instance_details,
 )
 
 from texture import (
@@ -63,6 +65,9 @@ from editor import (
     get_open_asset_editors,
     get_selected_assets,
     get_selected_actors,
+    execute_unreal_python,
+    get_post_process_volume_details,
+    get_current_level_post_process_overview,
     open_asset,
     focus_asset_editor,
     close_asset_editors,
@@ -71,6 +76,10 @@ from editor import (
     load_level,
     save_current_level,
     get_current_level,
+)
+
+from optimization import (
+    analyze_current_level_post_process,
 )
 
 from blueprint import (
@@ -82,6 +91,8 @@ __all__ = [
     # Material
     "build_material_graph",
     "get_material_graph",
+    "get_material_analysis",
+    "get_material_instance_details",
     # Texture
     "import_texture",
     # Mesh
@@ -120,6 +131,9 @@ __all__ = [
     "get_open_asset_editors",
     "get_selected_assets",
     "get_selected_actors",
+    "execute_unreal_python",
+    "get_post_process_volume_details",
+    "get_current_level_post_process_overview",
     "open_asset",
     "focus_asset_editor",
     "close_asset_editors",
@@ -128,6 +142,8 @@ __all__ = [
     "load_level",
     "save_current_level",
     "get_current_level",
+    # Optimization
+    "analyze_current_level_post_process",
     # Blueprint
     "get_blueprint_info",
     "update_blueprint",

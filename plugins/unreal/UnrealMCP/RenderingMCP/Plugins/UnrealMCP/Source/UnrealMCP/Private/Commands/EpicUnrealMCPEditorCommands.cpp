@@ -41,6 +41,8 @@
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "Framework/Docking/TabManager.h"
 #include "Widgets/Docking/SDockTab.h"
+#include "IPythonScriptPlugin.h"
+#include "PythonScriptTypes.h"
 
 // Niagara System creation support
 #include "NiagaraSystem.h"
@@ -48,6 +50,36 @@
 
 namespace
 {
+    FString PythonFileExecutionScopeToString(const EPythonFileExecutionScope Scope)
+    {
+        switch (Scope)
+        {
+        case EPythonFileExecutionScope::Private:
+            return TEXT("Private");
+        case EPythonFileExecutionScope::Public:
+            return TEXT("Public");
+        default:
+            return FString::Printf(TEXT("Unknown(%d)"), static_cast<int32>(Scope));
+        }
+    }
+
+    bool TryParsePythonFileExecutionScope(const FString& ScopeString, EPythonFileExecutionScope& OutScope)
+    {
+        if (ScopeString.Equals(TEXT("Private"), ESearchCase::IgnoreCase))
+        {
+            OutScope = EPythonFileExecutionScope::Private;
+            return true;
+        }
+
+        if (ScopeString.Equals(TEXT("Public"), ESearchCase::IgnoreCase))
+        {
+            OutScope = EPythonFileExecutionScope::Public;
+            return true;
+        }
+
+        return false;
+    }
+
     TSharedPtr<FJsonObject> CreateAssetSummary(UObject* Asset)
     {
         TSharedPtr<FJsonObject> Json = MakeShared<FJsonObject>();
@@ -243,6 +275,10 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleCommand(const FStrin
     else if (CommandType == TEXT("save_asset"))
     {
         return HandleSaveAsset(Params);
+    }
+    else if (CommandType == TEXT("execute_unreal_python"))
+    {
+        return HandleExecuteUnrealPython(Params);
     }
 
     // Actor manipulation commands
@@ -554,6 +590,100 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleSaveAsset(const TSha
     if (!bSaved)
     {
         ResultObj->SetStringField(TEXT("error"), TEXT("Failed to save asset"));
+    }
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleExecuteUnrealPython(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Code;
+    if (!Params->TryGetStringField(TEXT("code"), Code))
+    {
+        if (!Params->TryGetStringField(TEXT("command"), Code))
+        {
+            return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'code' or 'command' parameter"));
+        }
+    }
+
+    if (Code.TrimStartAndEnd().IsEmpty())
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Python code cannot be empty"));
+    }
+
+    FString ExecutionModeString = TEXT("ExecuteFile");
+    Params->TryGetStringField(TEXT("execution_mode"), ExecutionModeString);
+
+    EPythonCommandExecutionMode ExecutionMode = EPythonCommandExecutionMode::ExecuteFile;
+    if (!LexTryParseString(ExecutionMode, *ExecutionModeString))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(
+            TEXT("Invalid execution_mode '%s'. Expected ExecuteFile, ExecuteStatement, or EvaluateStatement"),
+            *ExecutionModeString));
+    }
+
+    FString FileExecutionScopeString = TEXT("Private");
+    Params->TryGetStringField(TEXT("file_execution_scope"), FileExecutionScopeString);
+
+    EPythonFileExecutionScope FileExecutionScope = EPythonFileExecutionScope::Private;
+    if (!TryParsePythonFileExecutionScope(FileExecutionScopeString, FileExecutionScope))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(
+            TEXT("Invalid file_execution_scope '%s'. Expected Private or Public"),
+            *FileExecutionScopeString));
+    }
+
+    bool bUnattended = true;
+    Params->TryGetBoolField(TEXT("unattended"), bUnattended);
+
+    IPythonScriptPlugin* PythonScriptPlugin = FModuleManager::Get().LoadModulePtr<IPythonScriptPlugin>(TEXT("PythonScriptPlugin"));
+    if (!PythonScriptPlugin)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("PythonScriptPlugin module is unavailable. Ensure the Python Script Plugin is enabled."));
+    }
+
+    const bool bWasPythonInitialized = PythonScriptPlugin->IsPythonInitialized();
+    if (!bWasPythonInitialized)
+    {
+        PythonScriptPlugin->ForceEnablePythonAtRuntime();
+    }
+
+    if (!PythonScriptPlugin->IsPythonInitialized())
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Python Script Plugin is loaded but Python could not be initialized."));
+    }
+
+    FPythonCommandEx PythonCommand;
+    PythonCommand.Command = Code;
+    PythonCommand.ExecutionMode = ExecutionMode;
+    PythonCommand.FileExecutionScope = FileExecutionScope;
+    if (bUnattended)
+    {
+        PythonCommand.Flags |= EPythonCommandFlags::Unattended;
+    }
+
+    const bool bSuccess = PythonScriptPlugin->ExecPythonCommandEx(PythonCommand);
+
+    TArray<TSharedPtr<FJsonValue>> LogOutputArray;
+    for (const FPythonLogOutputEntry& LogEntry : PythonCommand.LogOutput)
+    {
+        TSharedPtr<FJsonObject> LogEntryObject = MakeShared<FJsonObject>();
+        LogEntryObject->SetStringField(TEXT("type"), LexToString(LogEntry.Type));
+        LogEntryObject->SetStringField(TEXT("output"), LogEntry.Output);
+        LogOutputArray.Add(MakeShared<FJsonValueObject>(LogEntryObject));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), bSuccess);
+    ResultObj->SetStringField(TEXT("execution_mode"), LexToString(ExecutionMode));
+    ResultObj->SetStringField(TEXT("file_execution_scope"), PythonFileExecutionScopeToString(FileExecutionScope));
+    ResultObj->SetBoolField(TEXT("unattended"), bUnattended);
+    ResultObj->SetBoolField(TEXT("python_was_initialized"), bWasPythonInitialized);
+    ResultObj->SetBoolField(TEXT("python_is_initialized"), PythonScriptPlugin->IsPythonInitialized());
+    ResultObj->SetStringField(TEXT("command_result"), PythonCommand.CommandResult);
+    ResultObj->SetArrayField(TEXT("log_output"), LogOutputArray);
+    if (!bSuccess && !ResultObj->HasField(TEXT("error")))
+    {
+        ResultObj->SetStringField(TEXT("error"), PythonCommand.CommandResult.IsEmpty() ? TEXT("Python execution failed") : PythonCommand.CommandResult);
     }
     return ResultObj;
 }

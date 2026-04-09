@@ -25,6 +25,7 @@ private:
     TSharedPtr<FJsonObject> HandleFocusAssetEditor(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleCloseAssetEditors(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleSaveAsset(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleExecuteUnrealPython(const TSharedPtr<FJsonObject>& Params);
 
     // Actor manipulation commands
     TSharedPtr<FJsonObject> HandleGetActorsInLevel(const TSharedPtr<FJsonObject>& Params);

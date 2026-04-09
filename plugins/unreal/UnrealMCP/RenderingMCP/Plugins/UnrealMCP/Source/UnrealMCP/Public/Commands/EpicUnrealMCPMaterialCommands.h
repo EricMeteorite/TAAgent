@@ -47,6 +47,9 @@ private:
     
     /** Get material or material function graph (nodes + connections) */
     TSharedPtr<FJsonObject> HandleGetMaterialGraph(const TSharedPtr<FJsonObject>& Params);
+
+    /** Get optimization-focused material summary. */
+    TSharedPtr<FJsonObject> HandleGetMaterialAnalysis(const TSharedPtr<FJsonObject>& Params);
     
     /** Compile material to update shader */
     TSharedPtr<FJsonObject> HandleCompileMaterial(const TSharedPtr<FJsonObject>& Params);
@@ -60,6 +63,7 @@ private:
     
     TSharedPtr<FJsonObject> HandleCreateMaterialInstance(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleSetMaterialInstanceParameter(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleGetMaterialInstanceDetails(const TSharedPtr<FJsonObject>& Params);
 
     // ============================================================================
     // Texture Operations

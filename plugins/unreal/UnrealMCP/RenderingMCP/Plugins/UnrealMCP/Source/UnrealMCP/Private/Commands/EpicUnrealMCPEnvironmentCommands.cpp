@@ -18,6 +18,9 @@
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstance.h"
+#include "Materials/MaterialInterface.h"
 
 // Light includes
 #include "Engine/Light.h"
@@ -46,6 +49,145 @@
 // Level includes
 #include "Editor/UnrealEd/Public/FileHelpers.h"
 #include "Engine/Level.h"
+
+namespace
+{
+FString MaterialDomainToString(EMaterialDomain Domain)
+{
+    switch (Domain)
+    {
+    case MD_Surface:
+        return TEXT("Surface");
+    case MD_DeferredDecal:
+        return TEXT("DeferredDecal");
+    case MD_LightFunction:
+        return TEXT("LightFunction");
+    case MD_Volume:
+        return TEXT("Volume");
+    case MD_PostProcess:
+        return TEXT("PostProcess");
+    case MD_UI:
+        return TEXT("UI");
+    case MD_RuntimeVirtualTexture:
+        return TEXT("RuntimeVirtualTexture");
+    default:
+        return FString::Printf(TEXT("Unknown(%d)"), static_cast<int32>(Domain));
+    }
+}
+
+FString BlendableLocationToString(EBlendableLocation Location)
+{
+    switch (Location)
+    {
+    case BL_SceneColorAfterTonemapping:
+        return TEXT("AfterTonemapping");
+    case BL_SceneColorAfterDOF:
+        return TEXT("BeforeTonemapping");
+    case BL_SceneColorBeforeDOF:
+        return TEXT("BeforeTranslucency");
+    case BL_ReplacingTonemapper:
+        return TEXT("ReplacingTonemapper");
+    case BL_SSRInput:
+        return TEXT("SSRInput");
+    default:
+        return FString::Printf(TEXT("Unknown(%d)"), static_cast<int32>(Location));
+    }
+}
+
+TSharedPtr<FJsonObject> BuildWeightedBlendableJson(const FWeightedBlendable& WeightedBlendable)
+{
+    TSharedPtr<FJsonObject> BlendableObj = MakeShared<FJsonObject>();
+    BlendableObj->SetNumberField(TEXT("weight"), WeightedBlendable.Weight);
+
+    UObject* BlendableObject = WeightedBlendable.Object;
+    if (!BlendableObject)
+    {
+        BlendableObj->SetBoolField(TEXT("valid"), false);
+        return BlendableObj;
+    }
+
+    BlendableObj->SetBoolField(TEXT("valid"), true);
+    BlendableObj->SetStringField(TEXT("object_name"), BlendableObject->GetName());
+    BlendableObj->SetStringField(TEXT("object_class"), BlendableObject->GetClass()->GetName());
+    BlendableObj->SetStringField(TEXT("asset_path"), BlendableObject->GetPathName());
+
+    if (UMaterialInstance* MaterialInstance = Cast<UMaterialInstance>(BlendableObject))
+    {
+        BlendableObj->SetStringField(TEXT("material_type"), TEXT("MaterialInstance"));
+
+        if (MaterialInstance->Parent)
+        {
+            BlendableObj->SetStringField(TEXT("parent_path"), MaterialInstance->Parent->GetPathName());
+        }
+
+        if (UMaterial* BaseMaterial = MaterialInstance->GetMaterial())
+        {
+            BlendableObj->SetStringField(TEXT("base_material_path"), BaseMaterial->GetPathName());
+            BlendableObj->SetStringField(TEXT("analysis_target_path"), BaseMaterial->GetPathName());
+            BlendableObj->SetStringField(TEXT("material_domain"), MaterialDomainToString(BaseMaterial->MaterialDomain));
+            BlendableObj->SetStringField(TEXT("blendable_location"), BlendableLocationToString(BaseMaterial->BlendableLocation));
+        }
+    }
+    else if (UMaterialInterface* MaterialInterface = Cast<UMaterialInterface>(BlendableObject))
+    {
+        BlendableObj->SetStringField(TEXT("material_type"), TEXT("MaterialInterface"));
+        if (UMaterial* BaseMaterial = MaterialInterface->GetMaterial())
+        {
+            BlendableObj->SetStringField(TEXT("base_material_path"), BaseMaterial->GetPathName());
+            BlendableObj->SetStringField(TEXT("analysis_target_path"), BaseMaterial->GetPathName());
+            BlendableObj->SetStringField(TEXT("material_domain"), MaterialDomainToString(BaseMaterial->MaterialDomain));
+            BlendableObj->SetStringField(TEXT("blendable_location"), BlendableLocationToString(BaseMaterial->BlendableLocation));
+        }
+    }
+
+    return BlendableObj;
+}
+
+TSharedPtr<FJsonObject> BuildPostProcessVolumeJson(APostProcessVolume* PostProcessVolume, bool bIncludeBlendables)
+{
+    TSharedPtr<FJsonObject> VolumeObj = MakeShared<FJsonObject>();
+    VolumeObj->SetStringField(TEXT("actor_name"), PostProcessVolume->GetName());
+    VolumeObj->SetStringField(TEXT("actor_path"), PostProcessVolume->GetPathName());
+    VolumeObj->SetStringField(TEXT("level_path"), PostProcessVolume->GetLevel() ? PostProcessVolume->GetLevel()->GetOutermost()->GetName() : TEXT(""));
+    VolumeObj->SetBoolField(TEXT("enabled"), PostProcessVolume->bEnabled);
+    VolumeObj->SetBoolField(TEXT("unbound"), PostProcessVolume->bUnbound);
+    VolumeObj->SetNumberField(TEXT("priority"), PostProcessVolume->Priority);
+    VolumeObj->SetNumberField(TEXT("blend_radius"), PostProcessVolume->BlendRadius);
+    VolumeObj->SetNumberField(TEXT("blend_weight"), PostProcessVolume->BlendWeight);
+
+    if (bIncludeBlendables)
+    {
+        TArray<TSharedPtr<FJsonValue>> WeightedBlendables;
+        for (const FWeightedBlendable& WeightedBlendable : PostProcessVolume->Settings.WeightedBlendables.Array)
+        {
+            WeightedBlendables.Add(MakeShared<FJsonValueObject>(BuildWeightedBlendableJson(WeightedBlendable)));
+        }
+
+        VolumeObj->SetNumberField(TEXT("weighted_blendable_count"), WeightedBlendables.Num());
+        VolumeObj->SetArrayField(TEXT("weighted_blendables"), WeightedBlendables);
+    }
+
+    return VolumeObj;
+}
+
+AActor* FindActorByNameOrPath(UWorld* World, const FString& ActorNameOrPath)
+{
+    if (!World || ActorNameOrPath.IsEmpty())
+    {
+        return nullptr;
+    }
+
+    for (TActorIterator<AActor> It(World); It; ++It)
+    {
+        if (It->GetName() == ActorNameOrPath || It->GetPathName() == ActorNameOrPath)
+        {
+            return *It;
+        }
+    }
+
+    return nullptr;
+}
+}
 
 // ============================================================================
 // Viewport Screenshot
@@ -261,6 +403,14 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleCommand(const F
     else if (CommandType == TEXT("get_actor_properties"))
     {
         return HandleGetActorProperties(Params);
+    }
+    else if (CommandType == TEXT("get_post_process_volume_details"))
+    {
+        return HandleGetPostProcessVolumeDetails(Params);
+    }
+    else if (CommandType == TEXT("get_current_level_post_process_overview"))
+    {
+        return HandleGetCurrentLevelPostProcessOverview(Params);
     }
     // Batch operations (批量操作)
     else if (CommandType == TEXT("batch_spawn_actors"))
@@ -1237,6 +1387,83 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetActorPropert
     
     ResultObj->SetObjectField(TEXT("properties"), PropertiesObj);
 
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetPostProcessVolumeDetails(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!GEditor)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Editor not available"));
+    }
+
+    FString ActorNameOrPath;
+    if (!Params->TryGetStringField(TEXT("actor_name"), ActorNameOrPath))
+    {
+        if (!Params->TryGetStringField(TEXT("actor_path"), ActorNameOrPath))
+        {
+            return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'actor_name' or 'actor_path' parameter"));
+        }
+    }
+
+    UWorld* World = GEditor->GetEditorWorldContext().World();
+    if (!World)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("No active world found"));
+    }
+
+    APostProcessVolume* PostProcessVolume = Cast<APostProcessVolume>(FindActorByNameOrPath(World, ActorNameOrPath));
+    if (!PostProcessVolume)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("PostProcessVolume not found: %s"), *ActorNameOrPath));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = BuildPostProcessVolumeJson(PostProcessVolume, true);
+    ResultObj->SetBoolField(TEXT("success"), true);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetCurrentLevelPostProcessOverview(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!GEditor)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Editor not available"));
+    }
+
+    UWorld* World = GEditor->GetEditorWorldContext().World();
+    if (!World)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("No active world found"));
+    }
+
+    FString LevelFilter;
+    Params->TryGetStringField(TEXT("level_filter"), LevelFilter);
+
+    TArray<TSharedPtr<FJsonValue>> VolumeArray;
+    int32 VolumeCount = 0;
+
+    for (TActorIterator<APostProcessVolume> It(World); It; ++It)
+    {
+        APostProcessVolume* PostProcessVolume = *It;
+        const FString ActorPath = PostProcessVolume->GetPathName();
+        const FString LevelPath = PostProcessVolume->GetLevel() ? PostProcessVolume->GetLevel()->GetOutermost()->GetName() : TEXT("");
+
+        if (!LevelFilter.IsEmpty() && !ActorPath.Contains(LevelFilter) && !LevelPath.Contains(LevelFilter))
+        {
+            continue;
+        }
+
+        VolumeArray.Add(MakeShared<FJsonValueObject>(BuildPostProcessVolumeJson(PostProcessVolume, true)));
+        ++VolumeCount;
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), true);
+    ResultObj->SetStringField(TEXT("current_level_path"), World->GetCurrentLevel() ? World->GetCurrentLevel()->GetOutermost()->GetName() : TEXT(""));
+    ResultObj->SetStringField(TEXT("current_level_name"), World->GetCurrentLevel() ? World->GetCurrentLevel()->GetName() : TEXT(""));
+    ResultObj->SetStringField(TEXT("level_filter"), LevelFilter);
+    ResultObj->SetNumberField(TEXT("volume_count"), VolumeCount);
+    ResultObj->SetArrayField(TEXT("volumes"), VolumeArray);
     return ResultObj;
 }
 

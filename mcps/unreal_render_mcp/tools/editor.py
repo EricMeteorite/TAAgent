@@ -167,3 +167,70 @@ def save_asset(asset_path: str) -> Dict[str, Any]:
         Save result and asset summary.
     """
     return send_command("save_asset", {"asset_path": asset_path})
+
+
+@with_unreal_connection
+def execute_unreal_python(
+    code: str,
+    execution_mode: str = "ExecuteFile",
+    file_execution_scope: str = "Private",
+    unattended: bool = True,
+) -> Dict[str, Any]:
+    """
+    Execute Python code inside the running Unreal Editor.
+
+    Args:
+        code: Python source code or statement to execute.
+        execution_mode: One of ExecuteFile, ExecuteStatement, EvaluateStatement.
+        file_execution_scope: Private or Public when using ExecuteFile.
+        unattended: Whether to suppress interactive UI while executing.
+
+    Returns:
+        Success flag, command result string, and captured Unreal Python log output.
+    """
+    return send_command(
+        "execute_unreal_python",
+        {
+            "code": code,
+            "execution_mode": execution_mode,
+            "file_execution_scope": file_execution_scope,
+            "unattended": unattended,
+        },
+    )
+
+
+@with_unreal_connection
+def get_post_process_volume_details(actor_name: Optional[str] = None, actor_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get detailed post process volume info including weighted blendables.
+
+    Args:
+        actor_name: PostProcessVolume actor name.
+        actor_path: Optional full actor path.
+
+    Returns:
+        Volume settings and weighted blendable asset list.
+    """
+    params: Dict[str, Any] = {}
+    if actor_name:
+        params["actor_name"] = actor_name
+    if actor_path:
+        params["actor_path"] = actor_path
+    return send_command("get_post_process_volume_details", params)
+
+
+@with_unreal_connection
+def get_current_level_post_process_overview(level_filter: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get current level post process overview for optimization analysis.
+
+    Args:
+        level_filter: Optional substring filter for sublevel/actor path.
+
+    Returns:
+        All post process volumes in the current world with weighted blendables.
+    """
+    params: Dict[str, Any] = {}
+    if level_filter:
+        params["level_filter"] = level_filter
+    return send_command("get_current_level_post_process_overview", params)

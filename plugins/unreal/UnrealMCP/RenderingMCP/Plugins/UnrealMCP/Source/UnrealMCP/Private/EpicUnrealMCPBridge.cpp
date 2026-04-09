@@ -232,6 +232,7 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                      CommandType == TEXT("focus_asset_editor") ||
                      CommandType == TEXT("close_asset_editors") ||
                      CommandType == TEXT("save_asset") ||
+                     CommandType == TEXT("execute_unreal_python") ||
                      CommandType == TEXT("get_actors_in_level") ||
                      CommandType == TEXT("find_actors_by_name") ||
                      CommandType == TEXT("set_actor_transform") ||
@@ -270,6 +271,8 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                      CommandType == TEXT("create_material_function") ||
                      CommandType == TEXT("build_material_graph") ||
                      CommandType == TEXT("get_material_graph") ||
+                     CommandType == TEXT("get_material_analysis") ||
+                     CommandType == TEXT("get_material_instance_details") ||
                      CommandType == TEXT("set_material_properties") ||
                      CommandType == TEXT("create_material_instance") ||
                      CommandType == TEXT("set_material_instance_parameter") ||
@@ -281,6 +284,8 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
             else if (CommandType == TEXT("get_viewport_screenshot") ||
                      CommandType == TEXT("set_viewport_camera") ||
                      CommandType == TEXT("get_viewport_camera") ||
+                     CommandType == TEXT("get_post_process_volume_details") ||
+                     CommandType == TEXT("get_current_level_post_process_overview") ||
                      CommandType == TEXT("create_level") ||
                      CommandType == TEXT("load_level") ||
                      CommandType == TEXT("save_current_level") ||

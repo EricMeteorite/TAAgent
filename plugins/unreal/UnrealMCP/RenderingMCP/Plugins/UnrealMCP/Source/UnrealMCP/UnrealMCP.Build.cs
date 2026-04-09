@@ -105,7 +105,8 @@ public class UnrealMCP : ModuleRules
 					"ToolMenus",           // For editor UI
 					"BlueprintEditorLibrary", // For Blueprint utilities
 					"MaterialEditor",      // For material creation and editing
-					"NiagaraEditor"        // For Niagara asset editing (AddEmitterToSystem)
+					"NiagaraEditor",       // For Niagara asset editing (AddEmitterToSystem)
+					"PythonScriptPlugin"   // For executing Unreal Python from MCP
 				}
 			);
 

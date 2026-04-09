@@ -47,6 +47,12 @@ public:
     
     /** Get actor properties using reflection. Reads all UPROPERTY values. */
     static TSharedPtr<FJsonObject> HandleGetActorProperties(const TSharedPtr<FJsonObject>& Params);
+
+    /** Get detailed post process volume data including weighted blendables. */
+    static TSharedPtr<FJsonObject> HandleGetPostProcessVolumeDetails(const TSharedPtr<FJsonObject>& Params);
+
+    /** Get current level post process overview for optimization analysis. */
+    static TSharedPtr<FJsonObject> HandleGetCurrentLevelPostProcessOverview(const TSharedPtr<FJsonObject>& Params);
     
     // ============================================================================
     // Batch Actor Management (批量操作)
