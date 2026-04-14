@@ -105,6 +105,7 @@ Write-Host "  4. AssetValidation adds Niagara validation and overdraw analysis t
 Write-Host ""
 Write-Host "[TAAgent] To uninstall later, run:"
 Write-Host "  powershell -ExecutionPolicy Bypass -File .\tools\remove_ue_plugin.ps1 -ProjectDir `"$resolvedProjectDir`""
+Write-Host "  powershell -ExecutionPolicy Bypass -File .\tools\remove_ue_plugin.ps1 -ProjectDir `"$resolvedProjectDir`" -ForceCloseEditor"
 Write-Host ""
 Write-Host "[TAAgent] Or simply delete these directories:"
 foreach ($pluginDir in $deployedPluginDirs) {

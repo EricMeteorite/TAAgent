@@ -181,6 +181,12 @@ powershell -ExecutionPolicy Bypass -File .\tools\deploy_ue_plugin.ps1 -ProjectDi
 powershell -ExecutionPolicy Bypass -File .\tools\remove_ue_plugin.ps1 -ProjectDir "D:\你的项目路径"
 ```
 
+如果 UE 编辑器还开着，也可以让脚本先关闭编辑器再卸载:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\remove_ue_plugin.ps1 -ProjectDir "D:\你的项目路径" -ForceCloseEditor
+```
+
 或者直接手动删除对应的 TAAgent 插件目录，例如: YourProject/Plugins/UnrealMCP/、YourProject/Plugins/AssetValidation/。
 
 卸载后你的项目恢复到之前的状态，不会有任何残留。
@@ -363,6 +369,12 @@ TAAgent 自己可以做到独立，但宿主软件仍然要存在。
 powershell -ExecutionPolicy Bypass -File .\tools\remove_ue_plugin.ps1 -ProjectDir "D:\你的项目路径"
 ```
 
+如果你不想手动先关编辑器，也可以改用:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\remove_ue_plugin.ps1 -ProjectDir "D:\你的项目路径" -ForceCloseEditor
+```
+
 3. 删除 TAAgent 整个文件夹
 
 之后你的系统、引擎、项目都恢复到安装前的状态。
@@ -404,6 +416,9 @@ powershell -ExecutionPolicy Bypass -File .\tools\show_unreal_python_console_snip
 ```powershell
 # 从你的项目中移除插件
 powershell -ExecutionPolicy Bypass -File .\tools\remove_ue_plugin.ps1 -ProjectDir "D:\你的项目路径"
+
+# 如果 UE 还开着，可让脚本自动关闭编辑器后再卸载
+powershell -ExecutionPolicy Bypass -File .\tools\remove_ue_plugin.ps1 -ProjectDir "D:\你的项目路径" -ForceCloseEditor
 
 # 然后删除 TAAgent 整个文件夹即可
 ```

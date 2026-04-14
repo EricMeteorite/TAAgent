@@ -91,7 +91,9 @@ def set_actor_properties(name: str, properties: dict) -> Dict[str, Any]:
 @with_unreal_connection
 def get_actor_properties(
     name: str,
-    properties: list = None
+    properties: list = None,
+    max_depth: int = 1,
+    include_all_properties: bool = False,
 ) -> Dict[str, Any]:
     """
     Get properties of an actor using UE reflection.
@@ -99,8 +101,14 @@ def get_actor_properties(
     Args:
         name: Actor name
         properties: Optional list of specific property names to get
+        max_depth: Recursive reflection depth for nested UObject/UStruct values
+        include_all_properties: Include non-editable reflected properties as well
     """
-    params = {"name": name}
+    params = {
+        "name": name,
+        "max_depth": max_depth,
+        "include_all_properties": include_all_properties,
+    }
     if properties:
         params["properties"] = properties
     return send_command("get_actor_properties", params)

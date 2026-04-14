@@ -61,7 +61,9 @@ def set_asset_properties(asset_path: str, properties: dict) -> Dict[str, Any]:
 @with_unreal_connection
 def get_asset_properties(
     asset_path: str,
-    properties: list = None
+    properties: list = None,
+    max_depth: int = 1,
+    include_all_properties: bool = False,
 ) -> Dict[str, Any]:
     """
     Get properties of any asset using UE reflection.
@@ -69,8 +71,14 @@ def get_asset_properties(
     Args:
         asset_path: Full asset path
         properties: Optional list of specific property names to get
+        max_depth: Recursive reflection depth for nested UObject/UStruct values
+        include_all_properties: Include non-editable reflected properties as well
     """
-    params = {"asset_path": asset_path}
+    params = {
+        "asset_path": asset_path,
+        "max_depth": max_depth,
+        "include_all_properties": include_all_properties,
+    }
     if properties:
         params["properties"] = properties
     return send_command("get_asset_properties", params)

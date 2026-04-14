@@ -80,8 +80,10 @@ private:
     static bool SetUObjectProperty(UObject* Object, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError);
 
     /** Get property from UObject as JsonValue */
-    static TSharedPtr<FJsonValue> GetUObjectPropertyAsJson(UObject* Object, const FString& PropertyName);
+    static TSharedPtr<FJsonValue> GetUObjectPropertyAsJson(UObject* Object, const FString& PropertyName,
+        int32 MaxDepth = 1, bool bIncludeAllProperties = false);
 
     /** Get all properties from UObject as JSON */
-    static TSharedPtr<FJsonObject> GetAllUObjectPropertiesAsJson(UObject* Object);
+    static TSharedPtr<FJsonObject> GetAllUObjectPropertiesAsJson(UObject* Object,
+        int32 MaxDepth = 1, bool bIncludeAllProperties = false);
 };

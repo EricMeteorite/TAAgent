@@ -143,7 +143,17 @@ TSharedPtr<FJsonObject> BuildWeightedBlendableJson(const FWeightedBlendable& Wei
     return BlendableObj;
 }
 
-TSharedPtr<FJsonObject> BuildPostProcessVolumeJson(APostProcessVolume* PostProcessVolume, bool bIncludeBlendables)
+TSharedPtr<FJsonObject> BuildPostProcessSettingsJson(const FPostProcessSettings& Settings, int32 MaxDepth, bool bIncludeAllProperties)
+{
+    return FEpicUnrealMCPCommonUtils::GetStructPropertiesAsJson(
+        FPostProcessSettings::StaticStruct(),
+        &Settings,
+        MaxDepth,
+        bIncludeAllProperties);
+}
+
+TSharedPtr<FJsonObject> BuildPostProcessVolumeJson(APostProcessVolume* PostProcessVolume, bool bIncludeBlendables,
+    bool bIncludeSettings, int32 MaxDepth, bool bIncludeAllProperties)
 {
     TSharedPtr<FJsonObject> VolumeObj = MakeShared<FJsonObject>();
     VolumeObj->SetStringField(TEXT("actor_name"), PostProcessVolume->GetName());
@@ -154,6 +164,11 @@ TSharedPtr<FJsonObject> BuildPostProcessVolumeJson(APostProcessVolume* PostProce
     VolumeObj->SetNumberField(TEXT("priority"), PostProcessVolume->Priority);
     VolumeObj->SetNumberField(TEXT("blend_radius"), PostProcessVolume->BlendRadius);
     VolumeObj->SetNumberField(TEXT("blend_weight"), PostProcessVolume->BlendWeight);
+
+    if (bIncludeSettings)
+    {
+        VolumeObj->SetObjectField(TEXT("settings"), BuildPostProcessSettingsJson(PostProcessVolume->Settings, MaxDepth, bIncludeAllProperties));
+    }
 
     if (bIncludeBlendables)
     {
@@ -714,137 +729,16 @@ bool FEpicUnrealMCPEnvironmentCommands::SetPropertyByName(UObject* Object, const
     return false;
 }
 
-TSharedPtr<FJsonValue> FEpicUnrealMCPEnvironmentCommands::GetPropertyAsJsonValue(UObject* Object, const FString& PropertyName)
+TSharedPtr<FJsonValue> FEpicUnrealMCPEnvironmentCommands::GetPropertyAsJsonValue(UObject* Object, const FString& PropertyName,
+    int32 MaxDepth, bool bIncludeAllProperties)
 {
-    if (!Object)
-    {
-        return MakeShared<FJsonValueNull>();
-    }
-
-    FProperty* Property = Object->GetClass()->FindPropertyByName(*PropertyName);
-    if (!Property)
-    {
-        return MakeShared<FJsonValueNull>();
-    }
-
-    void* PropertyAddr = Property->ContainerPtrToValuePtr<void>(Object);
-
-    // Bool
-    if (FBoolProperty* BoolProp = CastField<FBoolProperty>(Property))
-    {
-        return MakeShared<FJsonValueBoolean>(BoolProp->GetPropertyValue(PropertyAddr));
-    }
-    // Int
-    else if (FIntProperty* IntProp = CastField<FIntProperty>(Property))
-    {
-        return MakeShared<FJsonValueNumber>(IntProp->GetPropertyValue(PropertyAddr));
-    }
-    // Float
-    else if (FFloatProperty* FloatProp = CastField<FFloatProperty>(Property))
-    {
-        return MakeShared<FJsonValueNumber>(FloatProp->GetPropertyValue(PropertyAddr));
-    }
-    // Double
-    else if (FDoubleProperty* DoubleProp = CastField<FDoubleProperty>(Property))
-    {
-        return MakeShared<FJsonValueNumber>(DoubleProp->GetPropertyValue(PropertyAddr));
-    }
-    // String/Text/Name
-    else if (FStrProperty* StrProp = CastField<FStrProperty>(Property))
-    {
-        return MakeShared<FJsonValueString>(StrProp->GetPropertyValue(PropertyAddr));
-    }
-    else if (FTextProperty* TextProp = CastField<FTextProperty>(Property))
-    {
-        return MakeShared<FJsonValueString>(TextProp->GetPropertyValue(PropertyAddr).ToString());
-    }
-    else if (FNameProperty* NameProp = CastField<FNameProperty>(Property))
-    {
-        return MakeShared<FJsonValueString>(NameProp->GetPropertyValue(PropertyAddr).ToString());
-    }
-    // Vector
-    else if (FStructProperty* StructProp = CastField<FStructProperty>(Property))
-    {
-        if (StructProp->Struct == TBaseStructure<FVector>::Get())
-        {
-            FVector* Vec = (FVector*)PropertyAddr;
-            TArray<TSharedPtr<FJsonValue>> Arr;
-            Arr.Add(MakeShared<FJsonValueNumber>(Vec->X));
-            Arr.Add(MakeShared<FJsonValueNumber>(Vec->Y));
-            Arr.Add(MakeShared<FJsonValueNumber>(Vec->Z));
-            return MakeShared<FJsonValueArray>(Arr);
-        }
-        else if (StructProp->Struct == TBaseStructure<FRotator>::Get())
-        {
-            FRotator* Rot = (FRotator*)PropertyAddr;
-            TArray<TSharedPtr<FJsonValue>> Arr;
-            Arr.Add(MakeShared<FJsonValueNumber>(Rot->Pitch));
-            Arr.Add(MakeShared<FJsonValueNumber>(Rot->Yaw));
-            Arr.Add(MakeShared<FJsonValueNumber>(Rot->Roll));
-            return MakeShared<FJsonValueArray>(Arr);
-        }
-        else if (StructProp->Struct == TBaseStructure<FColor>::Get())
-        {
-            FColor* Col = (FColor*)PropertyAddr;
-            TArray<TSharedPtr<FJsonValue>> Arr;
-            Arr.Add(MakeShared<FJsonValueNumber>(Col->R));
-            Arr.Add(MakeShared<FJsonValueNumber>(Col->G));
-            Arr.Add(MakeShared<FJsonValueNumber>(Col->B));
-            Arr.Add(MakeShared<FJsonValueNumber>(Col->A));
-            return MakeShared<FJsonValueArray>(Arr);
-        }
-        else if (StructProp->Struct == TBaseStructure<FLinearColor>::Get())
-        {
-            FLinearColor* Col = (FLinearColor*)PropertyAddr;
-            TArray<TSharedPtr<FJsonValue>> Arr;
-            Arr.Add(MakeShared<FJsonValueNumber>(Col->R));
-            Arr.Add(MakeShared<FJsonValueNumber>(Col->G));
-            Arr.Add(MakeShared<FJsonValueNumber>(Col->B));
-            Arr.Add(MakeShared<FJsonValueNumber>(Col->A));
-            return MakeShared<FJsonValueArray>(Arr);
-        }
-    }
-    // Enum
-    else if (FEnumProperty* EnumProp = CastField<FEnumProperty>(Property))
-    {
-        int64 Value = EnumProp->GetUnderlyingProperty()->GetSignedIntPropertyValue(PropertyAddr);
-        return MakeShared<FJsonValueNumber>(Value);
-    }
-    else if (FByteProperty* ByteProp = CastField<FByteProperty>(Property))
-    {
-        if (ByteProp->GetIntPropertyEnum())
-        {
-            return MakeShared<FJsonValueNumber>(ByteProp->GetPropertyValue(PropertyAddr));
-        }
-    }
-
-    return MakeShared<FJsonValueString>(TEXT("(unsupported type)"));
+    return FEpicUnrealMCPCommonUtils::GetObjectPropertyAsJson(Object, PropertyName, MaxDepth, bIncludeAllProperties);
 }
 
-TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::GetAllPropertiesAsJson(UObject* Object)
+TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::GetAllPropertiesAsJson(UObject* Object,
+    int32 MaxDepth, bool bIncludeAllProperties)
 {
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    
-    if (!Object)
-    {
-        return Result;
-    }
-
-    for (TFieldIterator<FProperty> PropIt(Object->GetClass()); PropIt; ++PropIt)
-    {
-        FProperty* Property = *PropIt;
-        if (Property->HasAnyPropertyFlags(CPF_Edit | CPF_BlueprintVisible))
-        {
-            FString PropName = Property->GetName();
-            TSharedPtr<FJsonValue> PropValue = GetPropertyAsJsonValue(Object, PropName);
-            if (!PropValue->IsNull())
-            {
-                Result->SetField(PropName, PropValue);
-            }
-        }
-    }
-
-    return Result;
+    return FEpicUnrealMCPCommonUtils::GetAllObjectPropertiesAsJson(Object, MaxDepth, bIncludeAllProperties);
 }
 
 UActorComponent* FEpicUnrealMCPEnvironmentCommands::FindActorComponent(AActor* Actor, const FString& ComponentPattern)
@@ -1306,6 +1200,13 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetActorPropert
         }
     }
 
+    int32 MaxDepth = 1;
+    Params->TryGetNumberField(TEXT("max_depth"), MaxDepth);
+    MaxDepth = FMath::Clamp(MaxDepth, 0, 8);
+
+    bool bIncludeAllProperties = false;
+    Params->TryGetBoolField(TEXT("include_all_properties"), bIncludeAllProperties);
+
     UWorld* World = GEditor->GetEditorWorldContext().World();
     if (!World)
     {
@@ -1332,6 +1233,8 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetActorPropert
     ResultObj->SetBoolField(TEXT("success"), true);
     ResultObj->SetStringField(TEXT("name"), TargetActor->GetName());
     ResultObj->SetStringField(TEXT("class"), TargetActor->GetClass()->GetName());
+    ResultObj->SetNumberField(TEXT("max_depth"), MaxDepth);
+    ResultObj->SetBoolField(TEXT("include_all_properties"), bIncludeAllProperties);
 
     // Transform
     FVector Loc = TargetActor->GetActorLocation();
@@ -1363,7 +1266,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetActorPropert
         // Get specific properties
         for (const FString& PropName : RequestedProperties)
         {
-            TSharedPtr<FJsonValue> PropValue = GetPropertyAsJsonValue(TargetActor, PropName);
+            TSharedPtr<FJsonValue> PropValue = GetPropertyAsJsonValue(TargetActor, PropName, MaxDepth, bIncludeAllProperties);
             if (!PropValue->IsNull())
             {
                 PropertiesObj->SetField(PropName, PropValue);
@@ -1374,7 +1277,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetActorPropert
                 UActorComponent* Comp = FindActorComponent(TargetActor, PropName);
                 if (Comp)
                 {
-                    PropertiesObj->SetObjectField(PropName, GetAllPropertiesAsJson(Comp));
+                    PropertiesObj->SetObjectField(PropName, GetAllPropertiesAsJson(Comp, MaxDepth, bIncludeAllProperties));
                 }
             }
         }
@@ -1382,7 +1285,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetActorPropert
     else
     {
         // Get all editable properties
-        PropertiesObj = GetAllPropertiesAsJson(TargetActor);
+        PropertiesObj = GetAllPropertiesAsJson(TargetActor, MaxDepth, bIncludeAllProperties);
     }
     
     ResultObj->SetObjectField(TEXT("properties"), PropertiesObj);
@@ -1418,8 +1321,25 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetPostProcessV
         return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("PostProcessVolume not found: %s"), *ActorNameOrPath));
     }
 
-    TSharedPtr<FJsonObject> ResultObj = BuildPostProcessVolumeJson(PostProcessVolume, true);
+    int32 MaxDepth = 1;
+    Params->TryGetNumberField(TEXT("max_depth"), MaxDepth);
+    MaxDepth = FMath::Clamp(MaxDepth, 0, 8);
+
+    bool bIncludeAllProperties = false;
+    Params->TryGetBoolField(TEXT("include_all_properties"), bIncludeAllProperties);
+
+    bool bIncludeBlendables = true;
+    Params->TryGetBoolField(TEXT("include_blendables"), bIncludeBlendables);
+
+    bool bIncludeSettings = true;
+    Params->TryGetBoolField(TEXT("include_settings"), bIncludeSettings);
+
+    TSharedPtr<FJsonObject> ResultObj = BuildPostProcessVolumeJson(PostProcessVolume, bIncludeBlendables, bIncludeSettings, MaxDepth, bIncludeAllProperties);
     ResultObj->SetBoolField(TEXT("success"), true);
+    ResultObj->SetNumberField(TEXT("max_depth"), MaxDepth);
+    ResultObj->SetBoolField(TEXT("include_all_properties"), bIncludeAllProperties);
+    ResultObj->SetBoolField(TEXT("include_blendables"), bIncludeBlendables);
+    ResultObj->SetBoolField(TEXT("include_settings"), bIncludeSettings);
     return ResultObj;
 }
 
@@ -1439,6 +1359,19 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetCurrentLevel
     FString LevelFilter;
     Params->TryGetStringField(TEXT("level_filter"), LevelFilter);
 
+    int32 MaxDepth = 1;
+    Params->TryGetNumberField(TEXT("max_depth"), MaxDepth);
+    MaxDepth = FMath::Clamp(MaxDepth, 0, 8);
+
+    bool bIncludeAllProperties = false;
+    Params->TryGetBoolField(TEXT("include_all_properties"), bIncludeAllProperties);
+
+    bool bIncludeBlendables = true;
+    Params->TryGetBoolField(TEXT("include_blendables"), bIncludeBlendables);
+
+    bool bIncludeSettings = false;
+    Params->TryGetBoolField(TEXT("include_settings"), bIncludeSettings);
+
     TArray<TSharedPtr<FJsonValue>> VolumeArray;
     int32 VolumeCount = 0;
 
@@ -1453,7 +1386,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetCurrentLevel
             continue;
         }
 
-        VolumeArray.Add(MakeShared<FJsonValueObject>(BuildPostProcessVolumeJson(PostProcessVolume, true)));
+        VolumeArray.Add(MakeShared<FJsonValueObject>(BuildPostProcessVolumeJson(PostProcessVolume, bIncludeBlendables, bIncludeSettings, MaxDepth, bIncludeAllProperties)));
         ++VolumeCount;
     }
 
@@ -1462,6 +1395,10 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEnvironmentCommands::HandleGetCurrentLevel
     ResultObj->SetStringField(TEXT("current_level_path"), World->GetCurrentLevel() ? World->GetCurrentLevel()->GetOutermost()->GetName() : TEXT(""));
     ResultObj->SetStringField(TEXT("current_level_name"), World->GetCurrentLevel() ? World->GetCurrentLevel()->GetName() : TEXT(""));
     ResultObj->SetStringField(TEXT("level_filter"), LevelFilter);
+    ResultObj->SetNumberField(TEXT("max_depth"), MaxDepth);
+    ResultObj->SetBoolField(TEXT("include_all_properties"), bIncludeAllProperties);
+    ResultObj->SetBoolField(TEXT("include_blendables"), bIncludeBlendables);
+    ResultObj->SetBoolField(TEXT("include_settings"), bIncludeSettings);
     ResultObj->SetNumberField(TEXT("volume_count"), VolumeCount);
     ResultObj->SetArrayField(TEXT("volumes"), VolumeArray);
     return ResultObj;

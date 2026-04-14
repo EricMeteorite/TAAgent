@@ -1,6 +1,8 @@
 param(
     [Parameter(Mandatory=$true)]
-    [string]$ProjectDir
+    [string]$ProjectDir,
+
+    [switch]$ForceCloseEditor
 )
 
 Set-StrictMode -Version Latest
@@ -8,11 +10,118 @@ $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "common.ps1")
 
+function Test-TaAgentCommandLineContainsPath {
+    param(
+        [string]$CommandLine,
+        [string[]]$CandidatePaths
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CommandLine)) {
+        return $false
+    }
+
+    foreach ($candidatePath in $CandidatePaths) {
+        if ([string]::IsNullOrWhiteSpace($candidatePath)) {
+            continue
+        }
+
+        if ($CommandLine.IndexOf($candidatePath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Get-TaAgentProjectEditorProcesses {
+    param(
+        [string]$ResolvedProjectDir,
+        [string]$ResolvedUprojectPath
+    )
+
+    $candidatePaths = @($ResolvedProjectDir)
+    if (-not [string]::IsNullOrWhiteSpace($ResolvedUprojectPath)) {
+        $candidatePaths += $ResolvedUprojectPath
+    }
+
+    $matches = @()
+    $editorProcesses = Get-CimInstance Win32_Process -Filter "Name = 'UnrealEditor.exe' OR Name = 'UnrealEditor-Cmd.exe'" -ErrorAction SilentlyContinue
+    foreach ($editorProcess in $editorProcesses) {
+        $commandLine = [string]$editorProcess.CommandLine
+        if (-not (Test-TaAgentCommandLineContainsPath -CommandLine $commandLine -CandidatePaths $candidatePaths)) {
+            continue
+        }
+
+        $matches += [pscustomobject]@{
+            ProcessId = [int]$editorProcess.ProcessId
+            Name = [string]$editorProcess.Name
+            CommandLine = $commandLine
+        }
+    }
+
+    return $matches
+}
+
+function Write-TaAgentEditorProcessSummary {
+    param(
+        [object[]]$EditorProcesses
+    )
+
+    foreach ($editorProcess in $EditorProcesses) {
+        Write-Host ("  PID {0} {1}" -f $editorProcess.ProcessId, $editorProcess.Name)
+        Write-Host ("    {0}" -f $editorProcess.CommandLine)
+    }
+}
+
+function Stop-TaAgentProjectEditorProcesses {
+    param(
+        [object[]]$EditorProcesses
+    )
+
+    foreach ($editorProcess in $EditorProcesses) {
+        Write-Host ("[TAAgent] Stopping {0} (PID {1}) ..." -f $editorProcess.Name, $editorProcess.ProcessId)
+        Stop-Process -Id $editorProcess.ProcessId -Force -ErrorAction Stop
+    }
+
+    foreach ($editorProcess in $EditorProcesses) {
+        try {
+            Wait-Process -Id $editorProcess.ProcessId -Timeout 15 -ErrorAction Stop
+        }
+        catch [System.ArgumentException] {
+            # The process already exited between Stop-Process and Wait-Process.
+        }
+    }
+}
+
 $resolvedProjectDir = [System.IO.Path]::GetFullPath($ProjectDir)
+$uprojectFile = Get-ChildItem -Path $resolvedProjectDir -Filter "*.uproject" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+$resolvedUprojectPath = if ($null -ne $uprojectFile) { $uprojectFile.FullName } else { $null }
 $projectPluginsDir = Join-Path $resolvedProjectDir "Plugins"
 $pluginSpecs = @(Get-TaAgentProjectPluginSpecs)
 $removedPluginNames = @()
 $foundAnyPlugin = $false
+
+$editorProcesses = @(Get-TaAgentProjectEditorProcesses -ResolvedProjectDir $resolvedProjectDir -ResolvedUprojectPath $resolvedUprojectPath)
+if ($editorProcesses.Count -gt 0) {
+    if (-not $ForceCloseEditor) {
+        Write-Host "[TAAgent] Unreal Editor is still running for this project, so plugin DLLs are locked."
+        Write-Host "[TAAgent] Close the editor first, or rerun this script with -ForceCloseEditor."
+        Write-Host "[TAAgent] Detected editor process(es):"
+        Write-TaAgentEditorProcessSummary -EditorProcesses $editorProcesses
+        exit 1
+    }
+
+    Write-Host "[TAAgent] Unreal Editor is still running for this project."
+    Write-Host "[TAAgent] ForceCloseEditor was specified, so the script will stop the editor before uninstalling plugins."
+    Stop-TaAgentProjectEditorProcesses -EditorProcesses $editorProcesses
+
+    $remainingEditorProcesses = @(Get-TaAgentProjectEditorProcesses -ResolvedProjectDir $resolvedProjectDir -ResolvedUprojectPath $resolvedUprojectPath)
+    if ($remainingEditorProcesses.Count -gt 0) {
+        Write-Host "[TAAgent] ERROR: Unreal Editor is still running after the stop request."
+        Write-TaAgentEditorProcessSummary -EditorProcesses $remainingEditorProcesses
+        exit 1
+    }
+}
 
 if (-not (Test-Path $projectPluginsDir)) {
     Write-Host "[TAAgent] Plugins folder not found at $projectPluginsDir - nothing to remove."
@@ -41,9 +150,23 @@ foreach ($pluginSpec in $pluginSpecs) {
         continue
     }
 
-    Write-Host "[TAAgent] Removing plugin from: $pluginDir"
-    Remove-Item -Recurse -Force $pluginDir
-    $removedPluginNames += $pluginSpec.Name
+    try {
+        Write-Host "[TAAgent] Removing plugin from: $pluginDir"
+        Remove-Item -Recurse -Force $pluginDir -ErrorAction Stop
+        $removedPluginNames += $pluginSpec.Name
+    }
+    catch [System.UnauthorizedAccessException] {
+        Write-Host "[TAAgent] ERROR: A file under this plugin is still in use:"
+        Write-Host "  $pluginDir"
+        Write-Host "[TAAgent] Close Unreal Editor and retry, or rerun with -ForceCloseEditor."
+        exit 1
+    }
+    catch [System.IO.IOException] {
+        Write-Host "[TAAgent] ERROR: A file under this plugin is still in use:"
+        Write-Host "  $pluginDir"
+        Write-Host "[TAAgent] Close Unreal Editor and retry, or rerun with -ForceCloseEditor."
+        exit 1
+    }
 }
 
 if (-not $foundAnyPlugin) {

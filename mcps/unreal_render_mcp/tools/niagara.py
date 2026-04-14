@@ -84,6 +84,8 @@ def get_niagara_graph(
     
     # Optional filter
     module: str = "",
+    max_depth: int = 1,
+    include_all_properties: bool = False,
     save_to: Optional[str] = None
 ) -> Dict[str, Any]:
     """
@@ -99,6 +101,8 @@ def get_niagara_graph(
         script: Script type - "spawn" or "update" (default: "spawn")
         script_path: Direct path to standalone Niagara Script asset
         module: Optional filter - only return nodes matching this module name
+        max_depth: Recursive reflection depth for nested Niagara UObject/UStruct values
+        include_all_properties: Include non-editable reflected properties as well
         save_to: Optional path to save JSON
         
     Examples:
@@ -110,7 +114,9 @@ def get_niagara_graph(
     """
     params = {
         "script": script,
-        "module": module
+        "module": module,
+        "max_depth": max_depth,
+        "include_all_properties": include_all_properties,
     }
     
     # Determine location method
@@ -213,6 +219,8 @@ def get_niagara_emitter(
     detail_level: str = "overview",
     emitters: List[str] = None,
     include: List[str] = None,
+    max_depth: int = 1,
+    include_all_properties: bool = False,
     save_to: Optional[str] = None
 ) -> Dict[str, Any]:
     """
@@ -227,6 +235,8 @@ def get_niagara_emitter(
             - "renderers": Renderer configurations
             - "parameters": Parameter definitions
             - "stateless_analysis": Analyze Stateless conversion compatibility
+        max_depth: Recursive reflection depth for nested Niagara UObject/UStruct values
+        include_all_properties: Include non-editable reflected properties as well
         save_to: Optional path to save JSON
         
     Examples:
@@ -243,7 +253,9 @@ def get_niagara_emitter(
     """
     params = {
         "asset_path": asset_path,
-        "detail_level": detail_level
+        "detail_level": detail_level,
+        "max_depth": max_depth,
+        "include_all_properties": include_all_properties,
     }
     if emitters is not None:
         params["emitters"] = emitters

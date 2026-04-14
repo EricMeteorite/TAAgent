@@ -127,10 +127,12 @@ private:
     // ============================================================================
     
     // Core graph extraction (shared between embedded and standalone scripts)
-    TSharedPtr<FJsonObject> ExtractGraphFromScript(UNiagaraScript* Script, const FString& ModuleFilter = TEXT(""));
+    TSharedPtr<FJsonObject> ExtractGraphFromScript(UNiagaraScript* Script, const FString& ModuleFilter = TEXT(""),
+        int32 MaxDepth = 1, bool bIncludeAllProperties = false);
     
     // Graph node helpers
-    TSharedPtr<FJsonObject> GetNodeDetails(class UNiagaraNode* Node);
+    TSharedPtr<FJsonObject> GetNodeDetails(class UNiagaraNode* Node,
+        int32 MaxDepth = 1, bool bIncludeAllProperties = false);
     TArray<TSharedPtr<FJsonValue>> GetNodeConnections(class UNiagaraNode* Node, const TMap<class UEdGraphNode*, FString>& NodeIdMap);
     
     // ============================================================================
@@ -139,10 +141,13 @@ private:
     
     TSharedPtr<FJsonObject> GetNiagaraSystemOverview(UNiagaraSystem* System);
     TSharedPtr<FJsonObject> GetEmitterDetails(FNiagaraEmitterHandle& Handle, UNiagaraSystem* System, 
-        const TArray<FString>& IncludeSections);
-    TSharedPtr<FJsonObject> GetScriptDetails(UNiagaraScript* Script);
-    TSharedPtr<FJsonObject> GetRendererDetails(UNiagaraRendererProperties* Renderer);
-    TSharedPtr<FJsonObject> GetSimulationStageDetails(UNiagaraSimulationStageBase* Stage);
+        const TArray<FString>& IncludeSections, int32 MaxDepth = 1, bool bIncludeAllProperties = false);
+    TSharedPtr<FJsonObject> GetScriptDetails(UNiagaraScript* Script,
+        int32 MaxDepth = 1, bool bIncludeAllProperties = false);
+    TSharedPtr<FJsonObject> GetRendererDetails(UNiagaraRendererProperties* Renderer,
+        int32 MaxDepth = 1, bool bIncludeAllProperties = false);
+    TSharedPtr<FJsonObject> GetSimulationStageDetails(UNiagaraSimulationStageBase* Stage,
+        int32 MaxDepth = 1, bool bIncludeAllProperties = false);
     
     // Stateless analysis helper
     TSharedPtr<FJsonObject> AnalyzeStatelessCompatibility(FNiagaraEmitterHandle& Handle);

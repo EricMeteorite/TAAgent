@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Commands/EpicUnrealMCPNiagaraCommands.h"
+#include "Commands/EpicUnrealMCPCommonUtils.h"
 #include "NiagaraSystem.h"
 #include "NiagaraBakerSettings.h"
 #include "NiagaraBakerOutputTexture2D.h"
@@ -788,6 +789,13 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleGetNiagaraEmitter(c
     Params->TryGetStringField(TEXT("detail_level"), DetailLevel);
     
     TArray<FString> IncludeSections = ParseIncludeSections(Params);
+
+    int32 MaxDepth = 1;
+    Params->TryGetNumberField(TEXT("max_depth"), MaxDepth);
+    MaxDepth = FMath::Clamp(MaxDepth, 0, 8);
+
+    bool bIncludeAllProperties = false;
+    Params->TryGetBoolField(TEXT("include_all_properties"), bIncludeAllProperties);
     
     TArray<FString> RequestedEmitters;
     const TArray<TSharedPtr<FJsonValue>>* EmittersArray;
@@ -802,6 +810,13 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleGetNiagaraEmitter(c
     Result->SetStringField(TEXT("asset_name"), NiagaraSystem->GetName());
     Result->SetStringField(TEXT("asset_path"), AssetPath);
     Result->SetNumberField(TEXT("emitter_count"), NiagaraSystem->GetNumEmitters());
+    Result->SetNumberField(TEXT("max_depth"), MaxDepth);
+    Result->SetBoolField(TEXT("include_all_properties"), bIncludeAllProperties);
+
+    if (DetailLevel != TEXT("overview"))
+    {
+        Result->SetObjectField(TEXT("system_object"), FEpicUnrealMCPCommonUtils::GetObjectReferenceAsJson(NiagaraSystem, MaxDepth, bIncludeAllProperties));
+    }
     
     TArray<TSharedPtr<FJsonValue>> EmittersJson;
     
@@ -833,7 +848,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleGetNiagaraEmitter(c
         }
         else
         {
-            TSharedPtr<FJsonObject> EmitterDetails = GetEmitterDetails(Handle, NiagaraSystem, IncludeSections);
+            TSharedPtr<FJsonObject> EmitterDetails = GetEmitterDetails(Handle, NiagaraSystem, IncludeSections, MaxDepth, bIncludeAllProperties);
             EmittersJson.Add(MakeShareable(new FJsonValueObject(EmitterDetails)));
         }
     }
@@ -855,7 +870,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetNiagaraSystemOverview(
 }
 
 TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetEmitterDetails(FNiagaraEmitterHandle& Handle, 
-    UNiagaraSystem* System, const TArray<FString>& IncludeSections)
+    UNiagaraSystem* System, const TArray<FString>& IncludeSections, int32 MaxDepth, bool bIncludeAllProperties)
 {
     TSharedPtr<FJsonObject> EmitterJson = MakeShareable(new FJsonObject);
     
@@ -892,6 +907,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetEmitterDetails(FNiagar
                 if (Module)
                 {
                     TSharedPtr<FJsonObject> ModuleJson = MakeShareable(new FJsonObject);
+                    ModuleJson = FEpicUnrealMCPCommonUtils::GetObjectReferenceAsJson(Module, MaxDepth, bIncludeAllProperties);
                     ModuleJson->SetStringField(TEXT("name"), Module->GetName());
                     ModuleJson->SetStringField(TEXT("type"), Module->GetClass()->GetName());
                     ModuleJson->SetBoolField(TEXT("is_enabled"), Module->IsModuleEnabled());
@@ -943,7 +959,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetEmitterDetails(FNiagar
                         
                         UniqueModuleNames.Add(ModuleName);
                         
-                        TSharedPtr<FJsonObject> ModuleJson = MakeShareable(new FJsonObject);
+                        TSharedPtr<FJsonObject> ModuleJson = GetNodeDetails(Node, MaxDepth, bIncludeAllProperties);
                         ModuleJson->SetStringField(TEXT("name"), ModuleName);
                         ModuleJson->SetStringField(TEXT("type"), NodeClass);
                         ModuleJson->SetStringField(TEXT("script"), TEXT("spawn"));
@@ -978,7 +994,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetEmitterDetails(FNiagar
                         
                         UniqueModuleNames.Add(ModuleName);
                         
-                        TSharedPtr<FJsonObject> ModuleJson = MakeShareable(new FJsonObject);
+                        TSharedPtr<FJsonObject> ModuleJson = GetNodeDetails(Node, MaxDepth, bIncludeAllProperties);
                         ModuleJson->SetStringField(TEXT("name"), ModuleName);
                         ModuleJson->SetStringField(TEXT("type"), NodeClass);
                         ModuleJson->SetStringField(TEXT("script"), TEXT("update"));
@@ -1000,11 +1016,11 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetEmitterDetails(FNiagar
         
         if (EmitterData->SpawnScriptProps.Script)
         {
-            ScriptsJson->SetObjectField(TEXT("spawn"), GetScriptDetails(EmitterData->SpawnScriptProps.Script));
+            ScriptsJson->SetObjectField(TEXT("spawn"), GetScriptDetails(EmitterData->SpawnScriptProps.Script, MaxDepth, bIncludeAllProperties));
         }
         if (EmitterData->UpdateScriptProps.Script)
         {
-            ScriptsJson->SetObjectField(TEXT("update"), GetScriptDetails(EmitterData->UpdateScriptProps.Script));
+            ScriptsJson->SetObjectField(TEXT("update"), GetScriptDetails(EmitterData->UpdateScriptProps.Script, MaxDepth, bIncludeAllProperties));
         }
         
         TArray<TSharedPtr<FJsonValue>> EventHandlersJson;
@@ -1012,7 +1028,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetEmitterDetails(FNiagar
         {
             if (EventHandler.Script)
             {
-                TSharedPtr<FJsonObject> EventJson = GetScriptDetails(EventHandler.Script);
+                TSharedPtr<FJsonObject> EventJson = GetScriptDetails(EventHandler.Script, MaxDepth, bIncludeAllProperties);
                 EventJson->SetStringField(TEXT("execution_mode"), 
                     EventHandler.ExecutionMode == EScriptExecutionMode::EveryParticle ? TEXT("EveryParticle") : 
                     (EventHandler.ExecutionMode == EScriptExecutionMode::SpawnedParticles ? TEXT("SpawnedParticles") : TEXT("SingleParticle")));
@@ -1036,7 +1052,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetEmitterDetails(FNiagar
         {
             if (Renderer)
             {
-                RenderersJson.Add(MakeShareable(new FJsonValueObject(GetRendererDetails(Renderer))));
+                RenderersJson.Add(MakeShareable(new FJsonValueObject(GetRendererDetails(Renderer, MaxDepth, bIncludeAllProperties))));
             }
         }
         EmitterJson->SetArrayField(TEXT("renderers"), RenderersJson);
@@ -1051,7 +1067,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetEmitterDetails(FNiagar
         {
             if (Stage)
             {
-                StagesJson.Add(MakeShareable(new FJsonValueObject(GetSimulationStageDetails(Stage))));
+                StagesJson.Add(MakeShareable(new FJsonValueObject(GetSimulationStageDetails(Stage, MaxDepth, bIncludeAllProperties))));
             }
         }
         EmitterJson->SetArrayField(TEXT("simulation_stages"), StagesJson);
@@ -1102,7 +1118,8 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetEmitterDetails(FNiagar
     return EmitterJson;
 }
 
-TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetScriptDetails(UNiagaraScript* Script)
+TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetScriptDetails(UNiagaraScript* Script,
+    int32 MaxDepth, bool bIncludeAllProperties)
 {
     TSharedPtr<FJsonObject> ScriptJson = MakeShareable(new FJsonObject);
     
@@ -1112,6 +1129,8 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetScriptDetails(UNiagara
     }
     
     ScriptJson->SetStringField(TEXT("name"), Script->GetName());
+    ScriptJson->SetStringField(TEXT("path"), Script->GetPathName());
+    ScriptJson->SetObjectField(TEXT("script_object"), FEpicUnrealMCPCommonUtils::GetObjectReferenceAsJson(Script, MaxDepth, bIncludeAllProperties));
     
     FString UsageStr = TEXT("Unknown");
     switch (Script->GetUsage())
@@ -1129,6 +1148,18 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetScriptDetails(UNiagara
         default: break;
     }
     ScriptJson->SetStringField(TEXT("usage"), UsageStr);
+
+    if (UObject* ScriptSourceObject = Script->GetLatestSource())
+    {
+        ScriptJson->SetObjectField(TEXT("source_object"), FEpicUnrealMCPCommonUtils::GetObjectReferenceAsJson(ScriptSourceObject, FMath::Max(MaxDepth - 1, 0), bIncludeAllProperties));
+        if (UNiagaraScriptSource* Source = Cast<UNiagaraScriptSource>(ScriptSourceObject))
+        {
+            if (Source->NodeGraph)
+            {
+                ScriptJson->SetObjectField(TEXT("graph_object"), FEpicUnrealMCPCommonUtils::GetObjectReferenceAsJson(Source->NodeGraph, FMath::Max(MaxDepth - 1, 0), bIncludeAllProperties));
+            }
+        }
+    }
     
     TArray<TSharedPtr<FJsonValue>> ParametersJson;
     const FNiagaraParameterStore& ParamStore = Script->RapidIterationParameters;
@@ -1202,7 +1233,8 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetScriptDetails(UNiagara
     return ScriptJson;
 }
 
-TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetRendererDetails(UNiagaraRendererProperties* Renderer)
+TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetRendererDetails(UNiagaraRendererProperties* Renderer,
+    int32 MaxDepth, bool bIncludeAllProperties)
 {
     TSharedPtr<FJsonObject> RendererJson = MakeShareable(new FJsonObject);
     
@@ -1213,13 +1245,17 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetRendererDetails(UNiaga
     
     FString RendererType = Renderer->GetClass()->GetName();
     RendererType.RemoveFromEnd(TEXT("Properties"));
+    RendererJson->SetStringField(TEXT("name"), Renderer->GetName());
+    RendererJson->SetStringField(TEXT("class"), Renderer->GetClass()->GetName());
     RendererJson->SetStringField(TEXT("type"), RendererType);
     RendererJson->SetBoolField(TEXT("is_enabled"), Renderer->GetIsEnabled());
+    RendererJson->SetObjectField(TEXT("renderer_object"), FEpicUnrealMCPCommonUtils::GetObjectReferenceAsJson(Renderer, MaxDepth, bIncludeAllProperties));
     
     return RendererJson;
 }
 
-TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetSimulationStageDetails(UNiagaraSimulationStageBase* Stage)
+TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetSimulationStageDetails(UNiagaraSimulationStageBase* Stage,
+    int32 MaxDepth, bool bIncludeAllProperties)
 {
     TSharedPtr<FJsonObject> StageJson = MakeShareable(new FJsonObject);
     
@@ -1229,7 +1265,9 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetSimulationStageDetails
     }
     
     StageJson->SetStringField(TEXT("name"), Stage->GetName());
+    StageJson->SetStringField(TEXT("class"), Stage->GetClass()->GetName());
     StageJson->SetBoolField(TEXT("enabled"), Stage->bEnabled);
+    StageJson->SetObjectField(TEXT("stage_object"), FEpicUnrealMCPCommonUtils::GetObjectReferenceAsJson(Stage, MaxDepth, bIncludeAllProperties));
     
     return StageJson;
 }
@@ -2664,6 +2702,13 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleGetNiagaraGraph(con
     // Optional: filter by module name
     FString ModuleName;
     Params->TryGetStringField(TEXT("module"), ModuleName);
+
+    int32 MaxDepth = 1;
+    Params->TryGetNumberField(TEXT("max_depth"), MaxDepth);
+    MaxDepth = FMath::Clamp(MaxDepth, 0, 8);
+
+    bool bIncludeAllProperties = false;
+    Params->TryGetBoolField(TEXT("include_all_properties"), bIncludeAllProperties);
     
     // Get the script
     UNiagaraScript* Script = nullptr;
@@ -2728,10 +2773,15 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleGetNiagaraGraph(con
     }
     
     // Extract graph using helper function
-    return ExtractGraphFromScript(Script, ModuleName);
+    TSharedPtr<FJsonObject> GraphResult = ExtractGraphFromScript(Script, ModuleName, MaxDepth, bIncludeAllProperties);
+    GraphResult->SetStringField(TEXT("source_location"), SourceLocation);
+    GraphResult->SetNumberField(TEXT("max_depth"), MaxDepth);
+    GraphResult->SetBoolField(TEXT("include_all_properties"), bIncludeAllProperties);
+    return GraphResult;
 }
 
-TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::ExtractGraphFromScript(UNiagaraScript* Script, const FString& ModuleFilter)
+TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::ExtractGraphFromScript(UNiagaraScript* Script, const FString& ModuleFilter,
+    int32 MaxDepth, bool bIncludeAllProperties)
 {
     TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject);
     
@@ -2745,6 +2795,8 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::ExtractGraphFromScript(UN
     // Get script metadata
     Result->SetBoolField(TEXT("success"), true);
     Result->SetStringField(TEXT("script_name"), Script->GetName());
+    Result->SetStringField(TEXT("script_path"), Script->GetPathName());
+    Result->SetObjectField(TEXT("script_object"), FEpicUnrealMCPCommonUtils::GetObjectReferenceAsJson(Script, MaxDepth, bIncludeAllProperties));
     
     // Get script usage
     FString UsageStr = TEXT("Unknown");
@@ -2776,6 +2828,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::ExtractGraphFromScript(UN
     }
     
     Result->SetBoolField(TEXT("has_graph"), true);
+    Result->SetObjectField(TEXT("graph_object"), FEpicUnrealMCPCommonUtils::GetObjectReferenceAsJson(Graph, FMath::Max(MaxDepth - 1, 0), bIncludeAllProperties));
     
     // Build node ID map
     TMap<UEdGraphNode*, FString> NodeIdMap;
@@ -2809,7 +2862,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::ExtractGraphFromScript(UN
         }
         
         // Get node details
-        TSharedPtr<FJsonObject> NodeJson = GetNodeDetails(Node);
+        TSharedPtr<FJsonObject> NodeJson = GetNodeDetails(Node, MaxDepth, bIncludeAllProperties);
         FString NodeId = NodeIdMap[Node];
         NodeJson->SetStringField(TEXT("node_id"), NodeId);
         NodesArray.Add(MakeShareable(new FJsonValueObject(NodeJson)));
@@ -2846,7 +2899,8 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::ExtractGraphFromScript(UN
     return Result;
 }
 
-TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetNodeDetails(UNiagaraNode* Node)
+TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetNodeDetails(UNiagaraNode* Node,
+    int32 MaxDepth, bool bIncludeAllProperties)
 {
     TSharedPtr<FJsonObject> NodeJson = MakeShareable(new FJsonObject);
     
@@ -2861,6 +2915,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetNodeDetails(UNiagaraNo
     NodeJson->SetStringField(TEXT("type"), NodeClass);
     NodeJson->SetStringField(TEXT("name"), Node->GetName());
     NodeJson->SetStringField(TEXT("class"), Node->GetClass()->GetName());
+    NodeJson->SetObjectField(TEXT("node_object"), FEpicUnrealMCPCommonUtils::GetObjectReferenceAsJson(Node, MaxDepth, bIncludeAllProperties));
     
     // Position
     NodeJson->SetNumberField(TEXT("pos_x"), Node->NodePosX);
@@ -2914,6 +2969,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::GetNodeDetails(UNiagaraNo
         {
             NodeJson->SetStringField(TEXT("function_name"), FuncNode->FunctionScript->GetName());
             NodeJson->SetStringField(TEXT("function_path"), FuncNode->FunctionScript->GetPathName());
+            NodeJson->SetObjectField(TEXT("function_script"), FEpicUnrealMCPCommonUtils::GetObjectReferenceAsJson(FuncNode->FunctionScript, FMath::Max(MaxDepth - 1, 0), bIncludeAllProperties));
         }
         else
         {

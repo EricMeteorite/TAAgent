@@ -200,18 +200,34 @@ def execute_unreal_python(
 
 
 @with_unreal_connection
-def get_post_process_volume_details(actor_name: Optional[str] = None, actor_path: Optional[str] = None) -> Dict[str, Any]:
+def get_post_process_volume_details(
+    actor_name: Optional[str] = None,
+    actor_path: Optional[str] = None,
+    max_depth: int = 1,
+    include_all_properties: bool = False,
+    include_settings: bool = True,
+    include_blendables: bool = True,
+) -> Dict[str, Any]:
     """
     Get detailed post process volume info including weighted blendables.
 
     Args:
         actor_name: PostProcessVolume actor name.
         actor_path: Optional full actor path.
+        max_depth: Recursive reflection depth for nested settings/object values.
+        include_all_properties: Include non-editable reflected properties as well.
+        include_settings: Include full FPostProcessSettings struct serialization.
+        include_blendables: Include weighted blendable entries.
 
     Returns:
         Volume settings and weighted blendable asset list.
     """
-    params: Dict[str, Any] = {}
+    params: Dict[str, Any] = {
+        "max_depth": max_depth,
+        "include_all_properties": include_all_properties,
+        "include_settings": include_settings,
+        "include_blendables": include_blendables,
+    }
     if actor_name:
         params["actor_name"] = actor_name
     if actor_path:
@@ -220,17 +236,32 @@ def get_post_process_volume_details(actor_name: Optional[str] = None, actor_path
 
 
 @with_unreal_connection
-def get_current_level_post_process_overview(level_filter: Optional[str] = None) -> Dict[str, Any]:
+def get_current_level_post_process_overview(
+    level_filter: Optional[str] = None,
+    max_depth: int = 1,
+    include_all_properties: bool = False,
+    include_settings: bool = False,
+    include_blendables: bool = True,
+) -> Dict[str, Any]:
     """
     Get current level post process overview for optimization analysis.
 
     Args:
         level_filter: Optional substring filter for sublevel/actor path.
+        max_depth: Recursive reflection depth for nested settings/object values.
+        include_all_properties: Include non-editable reflected properties as well.
+        include_settings: Include full FPostProcessSettings struct serialization.
+        include_blendables: Include weighted blendable entries.
 
     Returns:
         All post process volumes in the current world with weighted blendables.
     """
-    params: Dict[str, Any] = {}
+    params: Dict[str, Any] = {
+        "max_depth": max_depth,
+        "include_all_properties": include_all_properties,
+        "include_settings": include_settings,
+        "include_blendables": include_blendables,
+    }
     if level_filter:
         params["level_filter"] = level_filter
     return send_command("get_current_level_post_process_overview", params)

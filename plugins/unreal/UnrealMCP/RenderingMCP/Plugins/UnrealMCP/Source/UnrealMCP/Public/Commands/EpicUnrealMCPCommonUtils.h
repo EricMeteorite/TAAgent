@@ -16,6 +16,9 @@ class UK2Node_VariableSet;
 class UK2Node_InputAction;
 class UK2Node_Self;
 class UFunction;
+class FProperty;
+class UStruct;
+class UObject;
 
 /**
  * Common utilities for EpicUnrealMCP commands
@@ -56,4 +59,12 @@ public:
     // Property utilities
     static bool SetObjectProperty(UObject* Object, const FString& PropertyName, 
                                  const TSharedPtr<FJsonValue>& Value, FString& OutErrorMessage);
+    static TSharedPtr<FJsonValue> GetObjectPropertyAsJson(UObject* Object, const FString& PropertyName,
+                                 int32 MaxDepth = 1, bool bIncludeAllProperties = false);
+    static TSharedPtr<FJsonObject> GetAllObjectPropertiesAsJson(UObject* Object,
+                                 int32 MaxDepth = 1, bool bIncludeAllProperties = false);
+    static TSharedPtr<FJsonObject> GetStructPropertiesAsJson(const UStruct* StructType, const void* StructData,
+                                 int32 MaxDepth = 1, bool bIncludeAllProperties = false);
+    static TSharedPtr<FJsonObject> GetObjectReferenceAsJson(UObject* Object,
+                                 int32 MaxDepth = 0, bool bIncludeAllProperties = false);
 }; 

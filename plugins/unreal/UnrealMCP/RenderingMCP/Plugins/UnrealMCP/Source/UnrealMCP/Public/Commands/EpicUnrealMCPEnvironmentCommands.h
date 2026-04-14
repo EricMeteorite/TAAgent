@@ -104,10 +104,12 @@ public:
     static bool SetPropertyByName(UObject* Object, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError);
     
     /** Get a property value from UObject as JsonValue */
-    static TSharedPtr<FJsonValue> GetPropertyAsJsonValue(UObject* Object, const FString& PropertyName);
+    static TSharedPtr<FJsonValue> GetPropertyAsJsonValue(UObject* Object, const FString& PropertyName,
+        int32 MaxDepth = 1, bool bIncludeAllProperties = false);
     
     /** Get all UPROPERTIES from an object as JSON object */
-    static TSharedPtr<FJsonObject> GetAllPropertiesAsJson(UObject* Object);
+    static TSharedPtr<FJsonObject> GetAllPropertiesAsJson(UObject* Object,
+        int32 MaxDepth = 1, bool bIncludeAllProperties = false);
     
     /** Find component on actor by class or name pattern */
     static UActorComponent* FindActorComponent(AActor* Actor, const FString& ComponentPattern);

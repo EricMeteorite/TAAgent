@@ -25,6 +25,408 @@
 #include "BlueprintActionDatabase.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "UObject/SoftObjectPath.h"
+#include "UObject/UnrealType.h"
+
+namespace
+{
+constexpr int32 GMCPMaxCollectionEntries = 256;
+
+bool ShouldSerializeProperty(const FProperty* Property, const bool bIncludeAllProperties)
+{
+    return Property
+        && !Property->HasAnyPropertyFlags(CPF_Deprecated)
+        && (bIncludeAllProperties || Property->HasAnyPropertyFlags(CPF_Edit | CPF_BlueprintVisible));
+}
+
+FString ExportPropertyValueToString(const FProperty* Property, const void* PropertyAddr)
+{
+    FString ExportedValue;
+    if (Property && PropertyAddr)
+    {
+        Property->ExportTextItem_Direct(ExportedValue, PropertyAddr, nullptr, nullptr, PPF_None);
+    }
+    return ExportedValue;
+}
+
+TSharedPtr<FJsonObject> BuildObjectSummary(UObject* Object)
+{
+    TSharedPtr<FJsonObject> ObjectJson = MakeShared<FJsonObject>();
+    ObjectJson->SetBoolField(TEXT("valid"), Object != nullptr);
+    if (!Object)
+    {
+        return ObjectJson;
+    }
+
+    ObjectJson->SetStringField(TEXT("object_name"), Object->GetName());
+    ObjectJson->SetStringField(TEXT("object_path"), Object->GetPathName());
+    ObjectJson->SetStringField(TEXT("object_class"), Object->GetClass()->GetName());
+    ObjectJson->SetStringField(TEXT("object_class_path"), Object->GetClass()->GetPathName());
+    if (UObject* Outer = Object->GetOuter())
+    {
+        ObjectJson->SetStringField(TEXT("outer_path"), Outer->GetPathName());
+    }
+
+    return ObjectJson;
+}
+
+TSharedPtr<FJsonValue> SerializePropertyValue(const FProperty* Property, const void* PropertyAddr,
+    int32 MaxDepth, bool bIncludeAllProperties, TSet<const UObject*>& VisitedObjects);
+
+TSharedPtr<FJsonObject> SerializeStructProperties(const UStruct* StructType, const void* StructData,
+    int32 MaxDepth, bool bIncludeAllProperties, TSet<const UObject*>& VisitedObjects)
+{
+    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+    if (!StructType || !StructData)
+    {
+        return Result;
+    }
+
+    Result->SetStringField(TEXT("__type"), StructType->GetName());
+
+    for (TFieldIterator<FProperty> PropIt(StructType, EFieldIterationFlags::IncludeSuper); PropIt; ++PropIt)
+    {
+        const FProperty* Property = *PropIt;
+        if (!ShouldSerializeProperty(Property, bIncludeAllProperties))
+        {
+            continue;
+        }
+
+        const void* ValuePtr = Property->ContainerPtrToValuePtr<const void>(StructData);
+        TSharedPtr<FJsonValue> JsonValue = SerializePropertyValue(Property, ValuePtr, MaxDepth, bIncludeAllProperties, VisitedObjects);
+        if (JsonValue.IsValid() && !JsonValue->IsNull())
+        {
+            Result->SetField(Property->GetName(), JsonValue);
+        }
+    }
+
+    return Result;
+}
+
+TSharedPtr<FJsonValue> SerializeNumericProperty(const FNumericProperty* NumericProperty, const void* PropertyAddr)
+{
+    if (!NumericProperty || !PropertyAddr)
+    {
+        return MakeShared<FJsonValueNull>();
+    }
+
+    if (NumericProperty->IsInteger())
+    {
+        return MakeShared<FJsonValueNumber>(static_cast<double>(NumericProperty->GetSignedIntPropertyValue(PropertyAddr)));
+    }
+
+    return MakeShared<FJsonValueNumber>(NumericProperty->GetFloatingPointPropertyValue(PropertyAddr));
+}
+
+TSharedPtr<FJsonValue> SerializeEnumValue(const UEnum* EnumDef, const int64 EnumValue)
+{
+    TSharedPtr<FJsonObject> EnumJson = MakeShared<FJsonObject>();
+    EnumJson->SetNumberField(TEXT("value"), static_cast<double>(EnumValue));
+    if (EnumDef)
+    {
+        EnumJson->SetStringField(TEXT("enum_type"), EnumDef->GetName());
+        EnumJson->SetStringField(TEXT("enum_name"), EnumDef->GetNameStringByValue(EnumValue));
+    }
+    return MakeShared<FJsonValueObject>(EnumJson);
+}
+
+TSharedPtr<FJsonValue> SerializeStructValue(const FStructProperty* StructProperty, const void* PropertyAddr,
+    int32 MaxDepth, bool bIncludeAllProperties, TSet<const UObject*>& VisitedObjects)
+{
+    if (!StructProperty || !PropertyAddr)
+    {
+        return MakeShared<FJsonValueNull>();
+    }
+
+    const UScriptStruct* Struct = StructProperty->Struct;
+    if (!Struct)
+    {
+        return MakeShared<FJsonValueNull>();
+    }
+
+    static const FName Vector3fStructName(TEXT("Vector3f"));
+    static const FName Vector4fStructName(TEXT("Vector4f"));
+
+    if (Struct == TBaseStructure<FVector>::Get())
+    {
+        const FVector* Vector = static_cast<const FVector*>(PropertyAddr);
+        TArray<TSharedPtr<FJsonValue>> Values;
+        Values.Add(MakeShared<FJsonValueNumber>(Vector->X));
+        Values.Add(MakeShared<FJsonValueNumber>(Vector->Y));
+        Values.Add(MakeShared<FJsonValueNumber>(Vector->Z));
+        return MakeShared<FJsonValueArray>(Values);
+    }
+    if (Struct == TBaseStructure<FVector2D>::Get())
+    {
+        const FVector2D* Vector = static_cast<const FVector2D*>(PropertyAddr);
+        TArray<TSharedPtr<FJsonValue>> Values;
+        Values.Add(MakeShared<FJsonValueNumber>(Vector->X));
+        Values.Add(MakeShared<FJsonValueNumber>(Vector->Y));
+        return MakeShared<FJsonValueArray>(Values);
+    }
+    if (Struct == TBaseStructure<FVector4>::Get())
+    {
+        const FVector4* Vector = static_cast<const FVector4*>(PropertyAddr);
+        TArray<TSharedPtr<FJsonValue>> Values;
+        Values.Add(MakeShared<FJsonValueNumber>(Vector->X));
+        Values.Add(MakeShared<FJsonValueNumber>(Vector->Y));
+        Values.Add(MakeShared<FJsonValueNumber>(Vector->Z));
+        Values.Add(MakeShared<FJsonValueNumber>(Vector->W));
+        return MakeShared<FJsonValueArray>(Values);
+    }
+    if (Struct->GetFName() == Vector3fStructName)
+    {
+        const FVector3f* Vector = static_cast<const FVector3f*>(PropertyAddr);
+        TArray<TSharedPtr<FJsonValue>> Values;
+        Values.Add(MakeShared<FJsonValueNumber>(Vector->X));
+        Values.Add(MakeShared<FJsonValueNumber>(Vector->Y));
+        Values.Add(MakeShared<FJsonValueNumber>(Vector->Z));
+        return MakeShared<FJsonValueArray>(Values);
+    }
+    if (Struct->GetFName() == Vector4fStructName)
+    {
+        const FVector4f* Vector = static_cast<const FVector4f*>(PropertyAddr);
+        TArray<TSharedPtr<FJsonValue>> Values;
+        Values.Add(MakeShared<FJsonValueNumber>(Vector->X));
+        Values.Add(MakeShared<FJsonValueNumber>(Vector->Y));
+        Values.Add(MakeShared<FJsonValueNumber>(Vector->Z));
+        Values.Add(MakeShared<FJsonValueNumber>(Vector->W));
+        return MakeShared<FJsonValueArray>(Values);
+    }
+    if (Struct == TBaseStructure<FRotator>::Get())
+    {
+        const FRotator* Rotator = static_cast<const FRotator*>(PropertyAddr);
+        TArray<TSharedPtr<FJsonValue>> Values;
+        Values.Add(MakeShared<FJsonValueNumber>(Rotator->Pitch));
+        Values.Add(MakeShared<FJsonValueNumber>(Rotator->Yaw));
+        Values.Add(MakeShared<FJsonValueNumber>(Rotator->Roll));
+        return MakeShared<FJsonValueArray>(Values);
+    }
+    if (Struct == TBaseStructure<FQuat>::Get())
+    {
+        const FQuat* Quat = static_cast<const FQuat*>(PropertyAddr);
+        TArray<TSharedPtr<FJsonValue>> Values;
+        Values.Add(MakeShared<FJsonValueNumber>(Quat->X));
+        Values.Add(MakeShared<FJsonValueNumber>(Quat->Y));
+        Values.Add(MakeShared<FJsonValueNumber>(Quat->Z));
+        Values.Add(MakeShared<FJsonValueNumber>(Quat->W));
+        return MakeShared<FJsonValueArray>(Values);
+    }
+    if (Struct == TBaseStructure<FTransform>::Get())
+    {
+        const FTransform* Transform = static_cast<const FTransform*>(PropertyAddr);
+        const FVector Translation = Transform->GetTranslation();
+        const FQuat Rotation = Transform->GetRotation();
+        const FVector Scale3D = Transform->GetScale3D();
+        TSharedPtr<FJsonObject> TransformJson = MakeShared<FJsonObject>();
+
+        TArray<TSharedPtr<FJsonValue>> TranslationValues;
+        TranslationValues.Add(MakeShared<FJsonValueNumber>(Translation.X));
+        TranslationValues.Add(MakeShared<FJsonValueNumber>(Translation.Y));
+        TranslationValues.Add(MakeShared<FJsonValueNumber>(Translation.Z));
+        TransformJson->SetArrayField(TEXT("translation"), TranslationValues);
+
+        TArray<TSharedPtr<FJsonValue>> RotationValues;
+        RotationValues.Add(MakeShared<FJsonValueNumber>(Rotation.X));
+        RotationValues.Add(MakeShared<FJsonValueNumber>(Rotation.Y));
+        RotationValues.Add(MakeShared<FJsonValueNumber>(Rotation.Z));
+        RotationValues.Add(MakeShared<FJsonValueNumber>(Rotation.W));
+        TransformJson->SetArrayField(TEXT("rotation"), RotationValues);
+
+        TArray<TSharedPtr<FJsonValue>> ScaleValues;
+        ScaleValues.Add(MakeShared<FJsonValueNumber>(Scale3D.X));
+        ScaleValues.Add(MakeShared<FJsonValueNumber>(Scale3D.Y));
+        ScaleValues.Add(MakeShared<FJsonValueNumber>(Scale3D.Z));
+        TransformJson->SetArrayField(TEXT("scale"), ScaleValues);
+
+        return MakeShared<FJsonValueObject>(TransformJson);
+    }
+    if (Struct == TBaseStructure<FLinearColor>::Get())
+    {
+        const FLinearColor* Color = static_cast<const FLinearColor*>(PropertyAddr);
+        TArray<TSharedPtr<FJsonValue>> Values;
+        Values.Add(MakeShared<FJsonValueNumber>(Color->R));
+        Values.Add(MakeShared<FJsonValueNumber>(Color->G));
+        Values.Add(MakeShared<FJsonValueNumber>(Color->B));
+        Values.Add(MakeShared<FJsonValueNumber>(Color->A));
+        return MakeShared<FJsonValueArray>(Values);
+    }
+    if (Struct == TBaseStructure<FColor>::Get())
+    {
+        const FColor* Color = static_cast<const FColor*>(PropertyAddr);
+        TArray<TSharedPtr<FJsonValue>> Values;
+        Values.Add(MakeShared<FJsonValueNumber>(Color->R));
+        Values.Add(MakeShared<FJsonValueNumber>(Color->G));
+        Values.Add(MakeShared<FJsonValueNumber>(Color->B));
+        Values.Add(MakeShared<FJsonValueNumber>(Color->A));
+        return MakeShared<FJsonValueArray>(Values);
+    }
+    if (Struct == TBaseStructure<FGuid>::Get())
+    {
+        const FGuid* Guid = static_cast<const FGuid*>(PropertyAddr);
+        return MakeShared<FJsonValueString>(Guid->ToString());
+    }
+
+    if (MaxDepth <= 0)
+    {
+        return MakeShared<FJsonValueString>(ExportPropertyValueToString(StructProperty, PropertyAddr));
+    }
+
+    return MakeShared<FJsonValueObject>(SerializeStructProperties(Struct, PropertyAddr, MaxDepth - 1, bIncludeAllProperties, VisitedObjects));
+}
+
+TSharedPtr<FJsonValue> SerializePropertyValue(const FProperty* Property, const void* PropertyAddr,
+    int32 MaxDepth, bool bIncludeAllProperties, TSet<const UObject*>& VisitedObjects)
+{
+    if (!Property || !PropertyAddr)
+    {
+        return MakeShared<FJsonValueNull>();
+    }
+
+    if (const FBoolProperty* BoolProperty = CastField<const FBoolProperty>(Property))
+    {
+        return MakeShared<FJsonValueBoolean>(BoolProperty->GetPropertyValue(PropertyAddr));
+    }
+    if (const FEnumProperty* EnumProperty = CastField<const FEnumProperty>(Property))
+    {
+        const int64 EnumValue = EnumProperty->GetUnderlyingProperty()->GetSignedIntPropertyValue(PropertyAddr);
+        return SerializeEnumValue(EnumProperty->GetEnum(), EnumValue);
+    }
+    if (const FByteProperty* ByteProperty = CastField<const FByteProperty>(Property))
+    {
+        if (ByteProperty->GetIntPropertyEnum())
+        {
+            return SerializeEnumValue(ByteProperty->GetIntPropertyEnum(), ByteProperty->GetPropertyValue(PropertyAddr));
+        }
+        return MakeShared<FJsonValueNumber>(ByteProperty->GetPropertyValue(PropertyAddr));
+    }
+    if (const FNumericProperty* NumericProperty = CastField<const FNumericProperty>(Property))
+    {
+        return SerializeNumericProperty(NumericProperty, PropertyAddr);
+    }
+    if (const FStrProperty* StrProperty = CastField<const FStrProperty>(Property))
+    {
+        return MakeShared<FJsonValueString>(StrProperty->GetPropertyValue(PropertyAddr));
+    }
+    if (const FNameProperty* NameProperty = CastField<const FNameProperty>(Property))
+    {
+        return MakeShared<FJsonValueString>(NameProperty->GetPropertyValue(PropertyAddr).ToString());
+    }
+    if (const FTextProperty* TextProperty = CastField<const FTextProperty>(Property))
+    {
+        return MakeShared<FJsonValueString>(TextProperty->GetPropertyValue(PropertyAddr).ToString());
+    }
+    if (const FStructProperty* StructProperty = CastField<const FStructProperty>(Property))
+    {
+        return SerializeStructValue(StructProperty, PropertyAddr, MaxDepth, bIncludeAllProperties, VisitedObjects);
+    }
+    if (const FObjectPropertyBase* ObjectProperty = CastField<const FObjectPropertyBase>(Property))
+    {
+        UObject* ReferencedObject = ObjectProperty->GetObjectPropertyValue(PropertyAddr);
+        if (!ReferencedObject)
+        {
+            return MakeShared<FJsonValueNull>();
+        }
+
+        TSharedPtr<FJsonObject> ObjectJson = BuildObjectSummary(ReferencedObject);
+        if (MaxDepth > 0 && !VisitedObjects.Contains(ReferencedObject))
+        {
+            VisitedObjects.Add(ReferencedObject);
+            ObjectJson->SetObjectField(TEXT("properties"), SerializeStructProperties(ReferencedObject->GetClass(), ReferencedObject, MaxDepth - 1, bIncludeAllProperties, VisitedObjects));
+            VisitedObjects.Remove(ReferencedObject);
+        }
+        return MakeShared<FJsonValueObject>(ObjectJson);
+    }
+    if (const FSoftObjectProperty* SoftObjectProperty = CastField<const FSoftObjectProperty>(Property))
+    {
+        const FSoftObjectPtr SoftObject = SoftObjectProperty->GetPropertyValue(PropertyAddr);
+        if (SoftObject.IsNull())
+        {
+            return MakeShared<FJsonValueNull>();
+        }
+
+        TSharedPtr<FJsonObject> ObjectJson = MakeShared<FJsonObject>();
+        ObjectJson->SetStringField(TEXT("soft_object_path"), SoftObject.ToSoftObjectPath().ToString());
+        ObjectJson->SetBoolField(TEXT("is_loaded"), SoftObject.IsValid());
+        return MakeShared<FJsonValueObject>(ObjectJson);
+    }
+    if (const FSoftClassProperty* SoftClassProperty = CastField<const FSoftClassProperty>(Property))
+    {
+        const FSoftObjectPtr SoftClass = SoftClassProperty->GetPropertyValue(PropertyAddr);
+        if (SoftClass.IsNull())
+        {
+            return MakeShared<FJsonValueNull>();
+        }
+
+        TSharedPtr<FJsonObject> ClassJson = MakeShared<FJsonObject>();
+        ClassJson->SetStringField(TEXT("soft_class_path"), SoftClass.ToSoftObjectPath().ToString());
+        ClassJson->SetBoolField(TEXT("is_loaded"), SoftClass.IsValid());
+        return MakeShared<FJsonValueObject>(ClassJson);
+    }
+    if (const FClassProperty* ClassProperty = CastField<const FClassProperty>(Property))
+    {
+        UClass* ClassValue = Cast<UClass>(ClassProperty->GetObjectPropertyValue(PropertyAddr));
+        if (!ClassValue)
+        {
+            return MakeShared<FJsonValueNull>();
+        }
+
+        TSharedPtr<FJsonObject> ClassJson = MakeShared<FJsonObject>();
+        ClassJson->SetStringField(TEXT("class_name"), ClassValue->GetName());
+        ClassJson->SetStringField(TEXT("class_path"), ClassValue->GetPathName());
+        return MakeShared<FJsonValueObject>(ClassJson);
+    }
+    if (const FArrayProperty* ArrayProperty = CastField<const FArrayProperty>(Property))
+    {
+        FScriptArrayHelper ArrayHelper(ArrayProperty, PropertyAddr);
+        TArray<TSharedPtr<FJsonValue>> Items;
+        const int32 EntryCount = FMath::Min(ArrayHelper.Num(), GMCPMaxCollectionEntries);
+        for (int32 Index = 0; Index < EntryCount; ++Index)
+        {
+            Items.Add(SerializePropertyValue(ArrayProperty->Inner, ArrayHelper.GetRawPtr(Index), MaxDepth, bIncludeAllProperties, VisitedObjects));
+        }
+        return MakeShared<FJsonValueArray>(Items);
+    }
+    if (const FSetProperty* SetProperty = CastField<const FSetProperty>(Property))
+    {
+        FScriptSetHelper SetHelper(SetProperty, PropertyAddr);
+        TArray<TSharedPtr<FJsonValue>> Items;
+        int32 AddedCount = 0;
+        for (int32 Index = 0; Index < SetHelper.GetMaxIndex() && AddedCount < GMCPMaxCollectionEntries; ++Index)
+        {
+            if (!SetHelper.IsValidIndex(Index))
+            {
+                continue;
+            }
+            Items.Add(SerializePropertyValue(SetProperty->ElementProp, SetHelper.GetElementPtr(Index), MaxDepth, bIncludeAllProperties, VisitedObjects));
+            ++AddedCount;
+        }
+        return MakeShared<FJsonValueArray>(Items);
+    }
+    if (const FMapProperty* MapProperty = CastField<const FMapProperty>(Property))
+    {
+        FScriptMapHelper MapHelper(MapProperty, PropertyAddr);
+        TArray<TSharedPtr<FJsonValue>> Entries;
+        int32 AddedCount = 0;
+        for (int32 Index = 0; Index < MapHelper.GetMaxIndex() && AddedCount < GMCPMaxCollectionEntries; ++Index)
+        {
+            if (!MapHelper.IsValidIndex(Index))
+            {
+                continue;
+            }
+
+            TSharedPtr<FJsonObject> EntryJson = MakeShared<FJsonObject>();
+            EntryJson->SetField(TEXT("key"), SerializePropertyValue(MapProperty->KeyProp, MapHelper.GetKeyPtr(Index), MaxDepth, bIncludeAllProperties, VisitedObjects));
+            EntryJson->SetField(TEXT("value"), SerializePropertyValue(MapProperty->ValueProp, MapHelper.GetValuePtr(Index), MaxDepth, bIncludeAllProperties, VisitedObjects));
+            Entries.Add(MakeShared<FJsonValueObject>(EntryJson));
+            ++AddedCount;
+        }
+        return MakeShared<FJsonValueArray>(Entries);
+    }
+
+    return MakeShared<FJsonValueString>(ExportPropertyValueToString(Property, PropertyAddr));
+}
+}
 
 // JSON Utilities
 TSharedPtr<FJsonObject> FEpicUnrealMCPCommonUtils::CreateErrorResponse(const FString& Message)
@@ -753,3 +1155,71 @@ bool FEpicUnrealMCPCommonUtils::SetObjectProperty(UObject* Object, const FString
                                     *Property->GetClass()->GetName(), *PropertyName);
     return false;
 } 
+
+TSharedPtr<FJsonValue> FEpicUnrealMCPCommonUtils::GetObjectPropertyAsJson(UObject* Object, const FString& PropertyName,
+    int32 MaxDepth, bool bIncludeAllProperties)
+{
+    if (!Object)
+    {
+        return MakeShared<FJsonValueNull>();
+    }
+
+    FProperty* Property = Object->GetClass()->FindPropertyByName(*PropertyName);
+    if (!Property)
+    {
+        for (TFieldIterator<FProperty> PropIt(Object->GetClass(), EFieldIterationFlags::IncludeSuper); PropIt; ++PropIt)
+        {
+            if (PropIt->GetName().Equals(PropertyName, ESearchCase::IgnoreCase))
+            {
+                Property = *PropIt;
+                break;
+            }
+        }
+    }
+
+    if (!Property)
+    {
+        return MakeShared<FJsonValueNull>();
+    }
+
+    const void* PropertyAddr = Property->ContainerPtrToValuePtr<const void>(Object);
+    TSet<const UObject*> VisitedObjects;
+    return SerializePropertyValue(Property, PropertyAddr, FMath::Clamp(MaxDepth, 0, 8), bIncludeAllProperties, VisitedObjects);
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPCommonUtils::GetAllObjectPropertiesAsJson(UObject* Object,
+    int32 MaxDepth, bool bIncludeAllProperties)
+{
+    TSet<const UObject*> VisitedObjects;
+    if (Object)
+    {
+        VisitedObjects.Add(Object);
+    }
+    return SerializeStructProperties(Object ? Object->GetClass() : nullptr, Object, FMath::Clamp(MaxDepth, 0, 8), bIncludeAllProperties, VisitedObjects);
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPCommonUtils::GetStructPropertiesAsJson(const UStruct* StructType, const void* StructData,
+    int32 MaxDepth, bool bIncludeAllProperties)
+{
+    TSet<const UObject*> VisitedObjects;
+    return SerializeStructProperties(StructType, StructData, FMath::Clamp(MaxDepth, 0, 8), bIncludeAllProperties, VisitedObjects);
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPCommonUtils::GetObjectReferenceAsJson(UObject* Object,
+    int32 MaxDepth, bool bIncludeAllProperties)
+{
+    TSharedPtr<FJsonObject> ObjectJson = BuildObjectSummary(Object);
+    if (!Object)
+    {
+        return ObjectJson;
+    }
+
+    if (MaxDepth > 0)
+    {
+        TSet<const UObject*> VisitedObjects;
+        VisitedObjects.Add(Object);
+        ObjectJson->SetObjectField(TEXT("properties"), SerializeStructProperties(Object->GetClass(), Object, FMath::Clamp(MaxDepth - 1, 0, 8), bIncludeAllProperties, VisitedObjects));
+    }
+
+    return ObjectJson;
+}

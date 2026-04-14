@@ -1404,134 +1404,16 @@ bool FEpicUnrealMCPEditorCommands::SetUObjectProperty(UObject* Object, const FSt
     return false;
 }
 
-TSharedPtr<FJsonValue> FEpicUnrealMCPEditorCommands::GetUObjectPropertyAsJson(UObject* Object, const FString& PropertyName)
+TSharedPtr<FJsonValue> FEpicUnrealMCPEditorCommands::GetUObjectPropertyAsJson(UObject* Object, const FString& PropertyName,
+    int32 MaxDepth, bool bIncludeAllProperties)
 {
-    if (!Object)
-    {
-        return MakeShared<FJsonValueNull>();
-    }
-
-    FProperty* Property = Object->GetClass()->FindPropertyByName(*PropertyName);
-    if (!Property)
-    {
-        // Try case-insensitive
-        for (TFieldIterator<FProperty> PropIt(Object->GetClass()); PropIt; ++PropIt)
-        {
-            if (PropIt->GetName().Equals(PropertyName, ESearchCase::IgnoreCase))
-            {
-                Property = *PropIt;
-                break;
-            }
-        }
-    }
-
-    if (!Property)
-    {
-        return MakeShared<FJsonValueNull>();
-    }
-
-    void* PropertyAddr = Property->ContainerPtrToValuePtr<void>(Object);
-
-    // Bool
-    if (FBoolProperty* BoolProp = CastField<FBoolProperty>(Property))
-    {
-        return MakeShared<FJsonValueBoolean>(BoolProp->GetPropertyValue(PropertyAddr));
-    }
-    // Int
-    else if (FIntProperty* IntProp = CastField<FIntProperty>(Property))
-    {
-        return MakeShared<FJsonValueNumber>(IntProp->GetPropertyValue(PropertyAddr));
-    }
-    // Float
-    else if (FFloatProperty* FloatProp = CastField<FFloatProperty>(Property))
-    {
-        return MakeShared<FJsonValueNumber>(FloatProp->GetPropertyValue(PropertyAddr));
-    }
-    // Double
-    else if (FDoubleProperty* DoubleProp = CastField<FDoubleProperty>(Property))
-    {
-        return MakeShared<FJsonValueNumber>(DoubleProp->GetPropertyValue(PropertyAddr));
-    }
-    // String
-    else if (FStrProperty* StrProp = CastField<FStrProperty>(Property))
-    {
-        return MakeShared<FJsonValueString>(StrProp->GetPropertyValue(PropertyAddr));
-    }
-    // Name
-    else if (FNameProperty* NameProp = CastField<FNameProperty>(Property))
-    {
-        return MakeShared<FJsonValueString>(NameProp->GetPropertyValue(PropertyAddr).ToString());
-    }
-    // Text
-    else if (FTextProperty* TextProp = CastField<FTextProperty>(Property))
-    {
-        return MakeShared<FJsonValueString>(TextProp->GetPropertyValue(PropertyAddr).ToString());
-    }
-    // Enum
-    else if (FEnumProperty* EnumProp = CastField<FEnumProperty>(Property))
-    {
-        int64 Value = EnumProp->GetUnderlyingProperty()->GetSignedIntPropertyValue(PropertyAddr);
-        return MakeShared<FJsonValueNumber>(Value);
-    }
-    else if (FByteProperty* ByteProp = CastField<FByteProperty>(Property))
-    {
-        if (ByteProp->GetIntPropertyEnum())
-        {
-            return MakeShared<FJsonValueNumber>(ByteProp->GetPropertyValue(PropertyAddr));
-        }
-    }
-    // Struct
-    else if (FStructProperty* StructProp = CastField<FStructProperty>(Property))
-    {
-        if (StructProp->Struct == TBaseStructure<FLinearColor>::Get())
-        {
-            FLinearColor* Color = (FLinearColor*)PropertyAddr;
-            TArray<TSharedPtr<FJsonValue>> Arr;
-            Arr.Add(MakeShared<FJsonValueNumber>(Color->R));
-            Arr.Add(MakeShared<FJsonValueNumber>(Color->G));
-            Arr.Add(MakeShared<FJsonValueNumber>(Color->B));
-            Arr.Add(MakeShared<FJsonValueNumber>(Color->A));
-            return MakeShared<FJsonValueArray>(Arr);
-        }
-        else if (StructProp->Struct == TBaseStructure<FColor>::Get())
-        {
-            FColor* Color = (FColor*)PropertyAddr;
-            TArray<TSharedPtr<FJsonValue>> Arr;
-            Arr.Add(MakeShared<FJsonValueNumber>(Color->R));
-            Arr.Add(MakeShared<FJsonValueNumber>(Color->G));
-            Arr.Add(MakeShared<FJsonValueNumber>(Color->B));
-            Arr.Add(MakeShared<FJsonValueNumber>(Color->A));
-            return MakeShared<FJsonValueArray>(Arr);
-        }
-    }
-
-    return MakeShared<FJsonValueString>(TEXT("(unsupported type)"));
+    return FEpicUnrealMCPCommonUtils::GetObjectPropertyAsJson(Object, PropertyName, MaxDepth, bIncludeAllProperties);
 }
 
-TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::GetAllUObjectPropertiesAsJson(UObject* Object)
+TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::GetAllUObjectPropertiesAsJson(UObject* Object,
+    int32 MaxDepth, bool bIncludeAllProperties)
 {
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-
-    if (!Object)
-    {
-        return Result;
-    }
-
-    for (TFieldIterator<FProperty> PropIt(Object->GetClass()); PropIt; ++PropIt)
-    {
-        FProperty* Property = *PropIt;
-        if (Property->HasAnyPropertyFlags(CPF_Edit | CPF_BlueprintVisible))
-        {
-            FString PropName = Property->GetName();
-            TSharedPtr<FJsonValue> PropValue = GetUObjectPropertyAsJson(Object, PropName);
-            if (!PropValue->IsNull())
-            {
-                Result->SetField(PropName, PropValue);
-            }
-        }
-    }
-
-    return Result;
+    return FEpicUnrealMCPCommonUtils::GetAllObjectPropertiesAsJson(Object, MaxDepth, bIncludeAllProperties);
 }
 
 TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleSetAssetProperties(const TSharedPtr<FJsonObject>& Params)
@@ -1626,10 +1508,19 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleGetAssetProperties(c
         }
     }
 
+    int32 MaxDepth = 1;
+    Params->TryGetNumberField(TEXT("max_depth"), MaxDepth);
+    MaxDepth = FMath::Clamp(MaxDepth, 0, 8);
+
+    bool bIncludeAllProperties = false;
+    Params->TryGetBoolField(TEXT("include_all_properties"), bIncludeAllProperties);
+
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetBoolField(TEXT("success"), true);
     ResultObj->SetStringField(TEXT("asset_path"), AssetPath);
     ResultObj->SetStringField(TEXT("asset_class"), Asset->GetClass()->GetName());
+    ResultObj->SetNumberField(TEXT("max_depth"), MaxDepth);
+    ResultObj->SetBoolField(TEXT("include_all_properties"), bIncludeAllProperties);
 
     TSharedPtr<FJsonObject> PropertiesObj = MakeShared<FJsonObject>();
 
@@ -1638,7 +1529,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleGetAssetProperties(c
         // Get specific properties
         for (const FString& PropName : RequestedProperties)
         {
-            TSharedPtr<FJsonValue> PropValue = GetUObjectPropertyAsJson(Asset, PropName);
+            TSharedPtr<FJsonValue> PropValue = GetUObjectPropertyAsJson(Asset, PropName, MaxDepth, bIncludeAllProperties);
             if (!PropValue->IsNull())
             {
                 PropertiesObj->SetField(PropName, PropValue);
@@ -1648,7 +1539,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleGetAssetProperties(c
     else
     {
         // Get all editable properties
-        PropertiesObj = GetAllUObjectPropertiesAsJson(Asset);
+        PropertiesObj = GetAllUObjectPropertiesAsJson(Asset, MaxDepth, bIncludeAllProperties);
     }
 
     ResultObj->SetObjectField(TEXT("properties"), PropertiesObj);
