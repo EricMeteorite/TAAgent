@@ -103,7 +103,7 @@ batch_spawn_actors([
 |------|---------|
 | `create_blueprint_variable(blueprint_name, variable_name, variable_type, ...)` | Create a Blueprint member variable |
 | `delete_blueprint_variable(blueprint_name, variable_name)` | Delete a Blueprint member variable |
-| `set_blueprint_variable_properties(blueprint_name, variable_name, **properties)` | Update Blueprint variable metadata and flags |
+| `set_blueprint_variable_properties(blueprint_name, variable_name, properties={...})` | Update Blueprint variable metadata and flags |
 
 ### Examples
 
@@ -127,8 +127,10 @@ delete_blueprint_variable(
 set_blueprint_variable_properties(
     blueprint_name="/Game/MyBP",
     variable_name="SequenceHarvestEnabled",
-    tooltip="Enable sequence-driven harvesting",
-    expose_on_spawn=True
+    properties={
+        "tooltip": "Enable sequence-driven harvesting",
+        "expose_on_spawn": True,
+    }
 )
 ```
 

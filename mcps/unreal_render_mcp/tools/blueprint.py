@@ -84,7 +84,7 @@ def delete_blueprint_variable(
 def set_blueprint_variable_properties(
     blueprint_name: str,
     variable_name: str,
-    **properties: Any,
+    properties: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Update an existing Blueprint variable's properties.
@@ -92,7 +92,7 @@ def set_blueprint_variable_properties(
     Args:
         blueprint_name: Blueprint asset path or name understood by UnrealMCP
         variable_name: Existing variable name
-        **properties: Variable property overrides accepted by UnrealMCP
+        properties: Variable property overrides accepted by UnrealMCP
 
     Returns:
         UnrealMCP response JSON
@@ -101,7 +101,8 @@ def set_blueprint_variable_properties(
         "blueprint_name": blueprint_name,
         "variable_name": variable_name,
     }
-    params.update(properties)
+    if properties:
+        params.update(properties)
     return send_command("set_blueprint_variable_properties", params)
 
 

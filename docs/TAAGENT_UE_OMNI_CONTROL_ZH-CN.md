@@ -46,7 +46,7 @@
 
 - `create_blueprint_variable(blueprint_name, variable_name, variable_type, ...)`
 - `delete_blueprint_variable(blueprint_name, variable_name)`
-- `set_blueprint_variable_properties(blueprint_name, variable_name, **properties)`
+- `set_blueprint_variable_properties(blueprint_name, variable_name, properties={...})`
 - `get_editor_context()`
 - `get_open_asset_editors()`
 - `get_selected_assets()`
