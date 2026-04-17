@@ -16,6 +16,8 @@
 
 这些能力是 Blueprint、Material、Niagara、DataTable、Widget、StateTree 之类“按当前窗口继续深度操作”的基础。
 
+另外，这次把 Blueprint 变量生命周期也补齐到了插件侧：除了创建和改属性，现在还支持直接删除成员变量，适合清理自动化过程中产生的重复 `_0` 残留变量。
+
 ## 这次已经补上的能力
 
 ### Unreal 插件命令
@@ -30,6 +32,7 @@
 - `focus_asset_editor`
 - `close_asset_editors`
 - `save_asset`
+- `delete_variable`
 
 它们位于 Unreal 插件的 Editor Commands 中：
 
@@ -41,6 +44,9 @@
 
 新增 Python 工具封装：
 
+- `create_blueprint_variable(blueprint_name, variable_name, variable_type, ...)`
+- `delete_blueprint_variable(blueprint_name, variable_name)`
+- `set_blueprint_variable_properties(blueprint_name, variable_name, **properties)`
 - `get_editor_context()`
 - `get_open_asset_editors()`
 - `get_selected_assets()`
@@ -83,6 +89,21 @@
 它不是“100% 官方唯一真相接口”，但已经比“完全不知道你当前打开了什么”强很多，足够作为自然语言工作流的第一版主上下文。
 
 ## 现在能支持的工作方式
+
+### 0. 清理 Blueprint 变量残留
+
+例如：
+
+- 删除自动化误生成的重复变量，例如 `SequenceHarvestEnabled_0`
+- 在保留现有图逻辑的前提下清掉未使用的成员变量
+- 配合 `create_variable`、`set_blueprint_variable_properties` 完成 Blueprint 变量增删改闭环
+
+`delete_variable` 的输入很直接：
+
+- `blueprint_name`
+- `variable_name`
+
+插件内部会调用 `FBlueprintEditorUtils::RemoveMemberVariable`，随后标记 Blueprint dirty、刷新属性面板并重新编译蓝图。
 
 ### 1. 读当前正在工作的资产编辑器上下文
 

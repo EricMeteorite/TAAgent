@@ -29,6 +29,9 @@ private:
     // Create variable in Blueprint
     TSharedPtr<FJsonObject> HandleCreateVariable(const TSharedPtr<FJsonObject>& Params);
 
+    // Delete variable from Blueprint
+    TSharedPtr<FJsonObject> HandleDeleteVariable(const TSharedPtr<FJsonObject>& Params);
+
     // Set variable properties in Blueprint (F19)
     TSharedPtr<FJsonObject> HandleSetVariableProperties(const TSharedPtr<FJsonObject>& Params);
 

@@ -22,6 +22,7 @@ get_assets(asset_class="NiagaraSystem")  # List any asset type
 |----------|-------|-------|
 | Generic Asset | 7 | create/delete/set/get/batch_create/batch_set/get_assets |
 | Generic Actor | 8 | spawn/delete/set/get/batch_spawn/batch_delete/batch_set/get_actors |
+| Blueprint Variable | 3 | create_blueprint_variable, delete_blueprint_variable, set_blueprint_variable_properties |
 | Material | 3 | build_material_graph, compile_material, get_material_graph |
 | Import | 2 | import_texture, import_fbx |
 | Niagara | 4 | get_niagara_graph, update_niagara_graph, get_niagara_emitter, update_niagara_emitter |
@@ -92,6 +93,43 @@ batch_spawn_actors([
     {"actor_class": "Sphere", "name": "Ball1", "location": {"x": 0, "y": 0, "z": 100}},
     {"actor_class": "Sphere", "name": "Ball2", "location": {"x": 200, "y": 0, "z": 100}}
 ])
+```
+
+---
+
+## Blueprint Variable Tools (3 tools)
+
+| Tool | Purpose |
+|------|---------|
+| `create_blueprint_variable(blueprint_name, variable_name, variable_type, ...)` | Create a Blueprint member variable |
+| `delete_blueprint_variable(blueprint_name, variable_name)` | Delete a Blueprint member variable |
+| `set_blueprint_variable_properties(blueprint_name, variable_name, **properties)` | Update Blueprint variable metadata and flags |
+
+### Examples
+
+```python
+# Create a bool variable
+create_blueprint_variable(
+    blueprint_name="/Game/MyBP",
+    variable_name="SequenceHarvestEnabled",
+    variable_type="bool",
+    is_public=True,
+    category="Harvest"
+)
+
+# Clean up an accidental duplicate variable
+delete_blueprint_variable(
+    blueprint_name="/Game/MyBP",
+    variable_name="SequenceHarvestEnabled_0"
+)
+
+# Adjust variable metadata
+set_blueprint_variable_properties(
+    blueprint_name="/Game/MyBP",
+    variable_name="SequenceHarvestEnabled",
+    tooltip="Enable sequence-driven harvesting",
+    expose_on_spawn=True
+)
 ```
 
 ---

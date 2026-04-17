@@ -19,6 +19,93 @@ logger = logging.getLogger("UnrealRenderMCP")
 
 
 @with_unreal_connection
+def create_blueprint_variable(
+    blueprint_name: str,
+    variable_name: str,
+    variable_type: str,
+    default_value: Any = None,
+    is_public: bool = False,
+    tooltip: str = "",
+    category: str = "Default"
+) -> Dict[str, Any]:
+    """
+    Create a member variable in a Blueprint.
+
+    Args:
+        blueprint_name: Blueprint asset path or name understood by UnrealMCP
+        variable_name: New variable name
+        variable_type: Variable type string such as bool, int, float, string, vector, rotator
+        default_value: Optional default value
+        is_public: Whether the variable should be instance-editable
+        tooltip: Optional variable tooltip
+        category: Variable category shown in the Blueprint editor
+
+    Returns:
+        UnrealMCP response JSON
+    """
+    params = {
+        "blueprint_name": blueprint_name,
+        "variable_name": variable_name,
+        "variable_type": variable_type,
+        "is_public": is_public,
+        "tooltip": tooltip,
+        "category": category,
+    }
+    if default_value is not None:
+        params["default_value"] = default_value
+    return send_command("create_variable", params)
+
+
+@with_unreal_connection
+def delete_blueprint_variable(
+    blueprint_name: str,
+    variable_name: str,
+) -> Dict[str, Any]:
+    """
+    Delete a member variable from a Blueprint.
+
+    Args:
+        blueprint_name: Blueprint asset path or name understood by UnrealMCP
+        variable_name: Variable name to remove
+
+    Returns:
+        UnrealMCP response JSON
+    """
+    return send_command(
+        "delete_variable",
+        {
+            "blueprint_name": blueprint_name,
+            "variable_name": variable_name,
+        },
+    )
+
+
+@with_unreal_connection
+def set_blueprint_variable_properties(
+    blueprint_name: str,
+    variable_name: str,
+    **properties: Any,
+) -> Dict[str, Any]:
+    """
+    Update an existing Blueprint variable's properties.
+
+    Args:
+        blueprint_name: Blueprint asset path or name understood by UnrealMCP
+        variable_name: Existing variable name
+        **properties: Variable property overrides accepted by UnrealMCP
+
+    Returns:
+        UnrealMCP response JSON
+    """
+    params = {
+        "blueprint_name": blueprint_name,
+        "variable_name": variable_name,
+    }
+    params.update(properties)
+    return send_command("set_blueprint_variable_properties", params)
+
+
+@with_unreal_connection
 def get_blueprint_info(
     blueprint_path: str,
     include_variables: bool = True,

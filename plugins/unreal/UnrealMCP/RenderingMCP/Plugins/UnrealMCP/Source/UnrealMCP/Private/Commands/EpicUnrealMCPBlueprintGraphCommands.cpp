@@ -31,6 +31,10 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintGraphCommands::HandleCommand(cons
     {
         return HandleCreateVariable(Params);
     }
+    else if (CommandType == TEXT("delete_variable"))
+    {
+        return HandleDeleteVariable(Params);
+    }
     else if (CommandType == TEXT("set_blueprint_variable_properties"))
     {
         return HandleSetVariableProperties(Params);
@@ -158,6 +162,26 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintGraphCommands::HandleCreateVariab
 
     // Use the BPVariables to create the variable
     return FBPVariables::CreateVariable(Params);
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintGraphCommands::HandleDeleteVariable(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName;
+    if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'blueprint_name' parameter"));
+    }
+
+    FString VariableName;
+    if (!Params->TryGetStringField(TEXT("variable_name"), VariableName))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'variable_name' parameter"));
+    }
+
+    UE_LOG(LogTemp, Display, TEXT("FEpicUnrealMCPBlueprintGraphCommands::HandleDeleteVariable: Deleting variable '%s' from blueprint '%s'"),
+        *VariableName, *BlueprintName);
+
+    return FBPVariables::DeleteVariable(Params);
 }
 
 TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintGraphCommands::HandleSetVariableProperties(const TSharedPtr<FJsonObject>& Params)

@@ -95,6 +95,59 @@ TSharedPtr<FJsonObject> FBPVariables::CreateVariable(const TSharedPtr<FJsonObjec
     return Result;
 }
 
+TSharedPtr<FJsonObject> FBPVariables::DeleteVariable(const TSharedPtr<FJsonObject>& Params)
+{
+    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+
+    FString BlueprintName = Params->GetStringField(TEXT("blueprint_name"));
+    FString VariableName = Params->GetStringField(TEXT("variable_name"));
+
+    UBlueprint* Blueprint = FEpicUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+
+    if (!Blueprint)
+    {
+        Result->SetBoolField("success", false);
+        Result->SetStringField("error", FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+        return Result;
+    }
+
+    const FName VarName(*VariableName);
+    bool bFound = false;
+    for (const FBPVariableDescription& Var : Blueprint->NewVariables)
+    {
+        if (Var.VarName == VarName)
+        {
+            bFound = true;
+            break;
+        }
+    }
+
+    if (!bFound)
+    {
+        Result->SetBoolField("success", false);
+        Result->SetStringField("error", FString::Printf(TEXT("Variable not found: %s"), *VariableName));
+        return Result;
+    }
+
+    FBlueprintEditorUtils::RemoveMemberVariable(Blueprint, VarName);
+
+    Blueprint->MarkPackageDirty();
+    FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+    if (GEditor)
+    {
+        FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
+        PropertyModule.NotifyCustomizationModuleChanged();
+    }
+
+    FKismetEditorUtilities::CompileBlueprint(Blueprint);
+
+    Result->SetBoolField("success", true);
+    Result->SetStringField("variable_name", VariableName);
+    Result->SetStringField("message", "Variable deleted successfully");
+    return Result;
+}
+
 TSharedPtr<FJsonObject> FBPVariables::SetVariableProperties(const TSharedPtr<FJsonObject>& Params)
 {
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();

@@ -21,6 +21,13 @@ public:
     static TSharedPtr<FJsonObject> CreateVariable(const TSharedPtr<FJsonObject>& Params);
 
     /**
+     * Deletes an existing variable from a Blueprint
+     * @param Params JSON containing blueprint_name and variable_name
+     * @return JSON with success and deleted variable details
+     */
+    static TSharedPtr<FJsonObject> DeleteVariable(const TSharedPtr<FJsonObject>& Params);
+
+    /**
      * Modifies properties of an existing variable without deleting it
      * @param Params JSON containing blueprint_name, variable_name, and optional properties:
      *        is_blueprint_writable, is_public, is_editable_in_instance,
