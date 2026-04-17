@@ -379,11 +379,11 @@ static void ApplyImportedTextureSettings(UTexture2D* Texture, const UNiagaraAtla
 
     Texture->SRGB = true;
     Texture->Filter = TF_Default;
-    Texture->AddressX = TA_Clamp;
-    Texture->AddressY = TA_Clamp;
+    Texture->AddressX = TA_Wrap;
+    Texture->AddressY = TA_Wrap;
     Texture->CompressionSettings = TextureCompressionSettings::TC_Default;
     Texture->CompressionNone = false;
-    Texture->LODGroup = TEXTUREGROUP_Effects;
+    Texture->LODGroup = TEXTUREGROUP_World;
 
     switch (CompressionMode)
     {
@@ -394,7 +394,6 @@ static void ApplyImportedTextureSettings(UTexture2D* Texture, const UNiagaraAtla
     case ENiagaraAtlasTextureCompressionMode::Lossless:
         Texture->CompressionNone = true;
         Texture->MipGenSettings = TMGS_NoMipmaps;
-        Texture->LODGroup = TEXTUREGROUP_EffectsNotFiltered;
         Texture->NeverStream = true;
         return;
 
@@ -410,6 +409,24 @@ static void ApplyImportedTextureSettings(UTexture2D* Texture, const UNiagaraAtla
     Texture->NeverStream = !bGenerateMipmaps || !bAllowTextureStreaming;
 }
 
+static bool FinalizeImportedTextureAsset(UTexture2D* Texture, const FString& AssetPath, FText& OutError)
+{
+    check(Texture);
+
+    Texture->SetDeterministicLightingGuid();
+    Texture->MarkPackageDirty();
+    Texture->PostEditChange();
+    Texture->UpdateResource();
+
+    if (!UEditorAssetLibrary::SaveLoadedAsset(Texture, false))
+    {
+        OutError = FText::FromString(FString::Printf(TEXT("Atlas imported but failed to save: %s"), *AssetPath));
+        return false;
+    }
+
+    return true;
+}
+
 static bool ImportAtlasTexture(
     const UNiagaraAtlasBakerToolSettings* Settings,
     const FIntPoint& ImageSize,
@@ -422,7 +439,8 @@ static bool ImportAtlasTexture(
 {
     const FString NormalizedDestinationPath = DestinationPath.EndsWith(TEXT("/")) ? DestinationPath.LeftChop(1) : DestinationPath;
     const FString AssetPath = NormalizedDestinationPath + TEXT("/") + AssetName;
-    UObject* ExistingAsset = nullptr;
+    TArray<FColor> TexturePixels;
+    ConvertAtlasPixelsToSrgb8(ImageData, TexturePixels);
 
     if (UEditorAssetLibrary::DoesAssetExist(AssetPath))
     {
@@ -432,7 +450,7 @@ static bool ImportAtlasTexture(
             return false;
         }
 
-        ExistingAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
+        UObject* ExistingAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
         if (ExistingAsset && GEditor)
         {
             if (UAssetEditorSubsystem* AssetEditorSubsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>())
@@ -441,11 +459,25 @@ static bool ImportAtlasTexture(
             }
         }
 
-        if (!UEditorAssetLibrary::DeleteAsset(AssetPath))
+        UTexture2D* ExistingTexture = Cast<UTexture2D>(ExistingAsset);
+        if (!ExistingTexture)
         {
-            OutError = FText::FromString(FString::Printf(TEXT("Failed to delete existing atlas asset: %s"), *AssetPath));
+            OutError = FText::FromString(FString::Printf(TEXT("Existing asset is not a Texture2D and cannot be updated safely: %s"), *AssetPath));
             return false;
         }
+
+        ExistingTexture->Modify();
+        ExistingTexture->PreEditChange(nullptr);
+        ExistingTexture->Source.Init(ImageSize.X, ImageSize.Y, 1, 1, ETextureSourceFormat::TSF_BGRA8, reinterpret_cast<const uint8*>(TexturePixels.GetData()));
+        ApplyImportedTextureSettings(ExistingTexture, Settings);
+
+        if (!FinalizeImportedTextureAsset(ExistingTexture, AssetPath, OutError))
+        {
+            return false;
+        }
+
+        OutTexture = ExistingTexture;
+        return true;
     }
 
     UPackage* Package = CreatePackage(*AssetPath);
@@ -457,9 +489,6 @@ static bool ImportAtlasTexture(
 
     Package->FullyLoad();
 
-    TArray<FColor> TexturePixels;
-    ConvertAtlasPixelsToSrgb8(ImageData, TexturePixels);
-
     OutTexture = NewObject<UTexture2D>(Package, *AssetName, RF_Public | RF_Standalone);
 
     if (!OutTexture)
@@ -470,23 +499,10 @@ static bool ImportAtlasTexture(
 
     OutTexture->Source.Init(ImageSize.X, ImageSize.Y, 1, 1, ETextureSourceFormat::TSF_BGRA8, reinterpret_cast<const uint8*>(TexturePixels.GetData()));
     ApplyImportedTextureSettings(OutTexture, Settings);
-    OutTexture->SetDeterministicLightingGuid();
 
     FAssetRegistryModule::AssetCreated(OutTexture);
-    OutTexture->MarkPackageDirty();
-    OutTexture->PostEditChange();
-    OutTexture->UpdateResource();
-
-    if (!UEditorAssetLibrary::SaveLoadedAsset(OutTexture, false))
+    if (!FinalizeImportedTextureAsset(OutTexture, AssetPath, OutError))
     {
-        OutError = FText::FromString(FString::Printf(TEXT("Atlas imported but failed to save: %s"), *AssetPath));
-        return false;
-    }
-
-    OutTexture = Cast<UTexture2D>(UEditorAssetLibrary::LoadAsset(AssetPath));
-    if (!OutTexture)
-    {
-        OutError = FText::FromString(FString::Printf(TEXT("Atlas was imported but failed to reload as a Texture2D: %s"), *AssetPath));
         return false;
     }
 

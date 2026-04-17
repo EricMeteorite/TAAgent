@@ -37,10 +37,10 @@ public:
     UPROPERTY(EditAnywhere, Category = "Import", meta = (DisplayName = "Import Atlas Into Project"))
     bool bImportAtlasIntoProject;
 
-    UPROPERTY(EditAnywhere, Category = "Import", meta = (DisplayName = "Use Niagara Asset Folder"))
+    UPROPERTY(EditAnywhere, Category = "Import", meta = (DisplayName = "Use Niagara Asset Folder", EditCondition = "bImportAtlasIntoProject", ToolTip = "When enabled, the atlas is always imported into the selected Niagara asset's folder and any custom import path is ignored."))
     bool bUseNiagaraFolderForImport;
 
-    UPROPERTY(EditAnywhere, Category = "Import", meta = (DisplayName = "Import Destination Path", ToolTip = "Unreal asset path, e.g. /Game/VFX/Baked"))
+    UPROPERTY(EditAnywhere, Category = "Import", meta = (DisplayName = "Import Destination Path", EditCondition = "bImportAtlasIntoProject && bUseNiagaraFolderForImport == false", ToolTip = "Unreal asset path, e.g. /Game/VFX/Baked. This is only used when Use Niagara Asset Folder is disabled."))
     FString ImportDestinationPath;
 
     UPROPERTY(EditAnywhere, Category = "Import", meta = (DisplayName = "Atlas Asset Name"))

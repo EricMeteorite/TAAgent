@@ -47,6 +47,7 @@
    - 输出目录
    - 是否导入回项目
    - 导入资产路径和资产名
+   - 如果要手动指定 `Import Destination Path`，必须先关闭 `Use Niagara Asset Folder`，否则仍然会导入到当前 Niagara 所在目录
    - `Import Optimization` 下的压缩模式、Mip 和 Streaming 策略
 6. 点击 `Bake Atlas`。
 
@@ -62,8 +63,15 @@
 - 默认 atlas 资产名：`T_<NiagaraName>_Atlas`
 - 默认 atlas 文件名：`<NiagaraName>_Atlas.png`
 - 默认打开导入后的 atlas 贴图
+- 导入后的 atlas 贴图默认使用 Texture Group = World（场景）
+- 导入后的 atlas 贴图默认 X/Y Tiling Method = Wrap
 - atlas 的取景、缩放和构图跟随 Niagara 原生 Baker 当前相机设置
 - 默认使用平台压缩格式导入 atlas，并生成 mip、允许 streaming，整体行为更接近常规 DXT 风格贴图
+
+## 覆盖同名 Atlas
+
+- 如果目标路径下已经存在同名 atlas `Texture2D`，再次 Bake 时会原地更新该贴图内容和导入设置，不再先删除再重建。
+- 这样可以避免编辑器里同名资产被删除后立刻重建时的包/对象冲突，降低覆盖同名 atlas 时的报错和崩溃风险。
 
 ## 导入优化
 
