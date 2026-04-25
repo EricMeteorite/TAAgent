@@ -61,6 +61,7 @@ TAAgent 不是单一程序，而是三块东西组合起来:
 - 启动 MCP 服务
 - 生成 UE Python Console 代码
 - 启动 RenderDoc
+- 直接触发当前 RenderDoc Live Capture 抓帧
 - 设置路径
 - 完全卸载
 
@@ -106,10 +107,15 @@ powershell -ExecutionPolicy Bypass -File .\tools\open_renderdoc_local.ps1 -Rende
 这个脚本会:
 
 - 把扩展安装到 TAAgent/.taagent-local/appdata/qrenderdoc/extensions
-- 用 TAAgent 自己的本地 AppData 和 Temp 启动 RenderDoc
+- 用 TAAgent 自己的本地 Temp 和 IPC 启动 RenderDoc
 - 让 RenderDoc 和 MCP 通过 TAAgent/.taagent-local/ipc/renderdoc 通信
 
-也就是说，RenderDoc 扩展不会写到系统 AppData。
+Windows 下需要额外注意:
+
+- RenderDoc 1.43 的部分配置/扩展发现仍然会落到系统 AppData
+- tools/open_renderdoc_local.ps1 会把扩展镜像到系统 qrenderdoc/extensions，避免 UI 里看不到扩展
+- tools/open_renderdoc_local.ps1 也会把 renderdoc_mcp_bridge 写入系统 UI.config 的 AlwaysLoad_Extensions，避免每次重启后默认不加载
+- TAAgent 仍然会把 Temp 和 RenderDoc MCP IPC 固定到 .taagent-local 下
 
 ### 4.2 启动 RenderDoc MCP 服务
 
@@ -120,6 +126,23 @@ powershell -ExecutionPolicy Bypass -File .\tools\start_renderdoc_mcp.ps1
 ```
 
 这个窗口需要保持打开。
+
+### 4.2.1 直接触发当前 Live Capture 抓帧
+
+如果你已经在 RenderDoc 里连上了目标进程的 Live Capture 窗口，并且窗口状态显示 Established，可以直接执行:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\trigger_renderdoc_live_capture.ps1
+```
+
+或者直接在 TAAgent.bat 菜单里使用 [10]。
+
+这个入口的特点:
+
+- 不依赖 RenderDoc MCP 服务窗口是否正在运行
+- 会先检查当前 Live Capture 按钮是否存在、可见、可点击
+- 只有在连接状态为 Established 时才会真正发送抓帧指令
+- 失败时会明确提示是没开 Live Capture 窗口、按钮不可用，还是当前 RenderDoc 需要重启加载新扩展
 
 ### 4.3 验证 RenderDoc 是否准备好
 
@@ -337,6 +360,7 @@ TAAgent 自己可以做到独立，但宿主软件仍然要存在。
 先检查:
 
 - RenderDoc 是否通过 tools/open_renderdoc_local.ps1 启动
+- Windows 下 Tools > Manage Extensions 里是否能看到 RenderDoc MCP Bridge
 - 扩展是否已经在 RenderDoc 中加载
 - RenderDoc 是否已经打开一个 capture
 - tools/start_renderdoc_mcp.ps1 对应窗口有没有报错

@@ -186,6 +186,7 @@ TAAgent.bat
 # 或直接运行 tools/ 下的 PowerShell 脚本：
 # tools/setup_local.ps1
 # tools/open_renderdoc_local.ps1
+# tools/trigger_renderdoc_live_capture.ps1
 # tools/start_renderdoc_mcp.ps1
 # tools/start_unreal_mcp.ps1
 ```

@@ -85,6 +85,38 @@ function Find-RenderDocExecutable {
         [string]$PreferredPath
     )
 
+    function Resolve-RenderDocCandidate {
+        param(
+            [string]$Candidate
+        )
+
+        if (-not $Candidate) {
+            return $null
+        }
+
+        $trimmed = $Candidate.Trim().Trim('"')
+        if (-not $trimmed) {
+            return $null
+        }
+
+        $trimmed = $trimmed.TrimEnd('\', '/')
+
+        if (Test-Path $trimmed -PathType Container) {
+            foreach ($name in @('qrenderdoc.exe', 'renderdocui.exe')) {
+                $child = Join-Path $trimmed $name
+                if (Test-Path $child -PathType Leaf) {
+                    return $child
+                }
+            }
+        }
+
+        if (Test-Path $trimmed -PathType Leaf) {
+            return $trimmed
+        }
+
+        return $null
+    }
+
     $candidates = @()
     if ($PreferredPath) {
         $candidates += $PreferredPath
@@ -98,8 +130,9 @@ function Find-RenderDocExecutable {
     )
 
     foreach ($candidate in $candidates) {
-        if ($candidate -and (Test-Path $candidate)) {
-            return [System.IO.Path]::GetFullPath($candidate)
+        $resolved = Resolve-RenderDocCandidate -Candidate $candidate
+        if ($resolved) {
+            return [System.IO.Path]::GetFullPath($resolved)
         }
     }
 

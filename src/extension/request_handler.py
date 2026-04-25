@@ -14,6 +14,8 @@ class RequestHandler:
         self._methods = {
             "ping": self._handle_ping,
             "get_capture_status": self._handle_get_capture_status,
+            "get_live_capture_ui_state": self._handle_get_live_capture_ui_state,
+            "trigger_live_capture": self._handle_trigger_live_capture,
             "get_draw_calls": self._handle_get_draw_calls,
             "get_frame_summary": self._handle_get_frame_summary,
             "find_draws_by_shader": self._handle_find_draws_by_shader,
@@ -66,6 +68,15 @@ class RequestHandler:
     def _handle_get_capture_status(self, params):
         """Handle get_capture_status request"""
         return self.facade.get_capture_status()
+
+    def _handle_get_live_capture_ui_state(self, params):
+        """Handle get_live_capture_ui_state request"""
+        return self.facade.get_live_capture_ui_state()
+
+    def _handle_trigger_live_capture(self, params):
+        """Handle trigger_live_capture request"""
+        button_name = params.get("button_name", "triggerImmediateCapture")
+        return self.facade.trigger_live_capture(button_name)
 
     def _handle_get_draw_calls(self, params):
         """Handle get_draw_calls request"""

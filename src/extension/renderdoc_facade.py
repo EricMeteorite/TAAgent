@@ -59,6 +59,14 @@ class RenderDocFacade:
         """Open a capture file in RenderDoc"""
         return self._capture.open_capture(capture_path)
 
+    def get_live_capture_ui_state(self):
+        """Inspect RenderDoc live capture UI widgets relevant to triggering a capture."""
+        return self._capture.get_live_capture_ui_state()
+
+    def trigger_live_capture(self, button_name="triggerImmediateCapture"):
+        """Programmatically click a live capture button by objectName."""
+        return self._capture.trigger_live_capture(button_name)
+
     # ==================== Draw Call / Action Operations ====================
 
     def get_draw_calls(

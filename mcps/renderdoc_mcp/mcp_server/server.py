@@ -29,6 +29,40 @@ def get_capture_status() -> dict:
 
 
 @mcp.tool
+def get_live_capture_ui_state() -> dict:
+    """
+    Inspect the current RenderDoc Live Capture UI state.
+
+    Returns the visible/enabled state of key Live Capture widgets such as:
+    - triggerImmediateCapture
+    - triggerDelayedCapture
+    - queueCap
+    - cycleActiveWindow
+    - connectionStatus
+    - target
+    """
+    return bridge.call("get_live_capture_ui_state")
+
+
+@mcp.tool
+def trigger_live_capture(
+    button_name: Literal[
+        "triggerImmediateCapture",
+        "triggerDelayedCapture",
+        "queueCap",
+        "cycleActiveWindow",
+    ] = "triggerImmediateCapture",
+) -> dict:
+    """
+    Programmatically click a Live Capture button inside RenderDoc.
+
+    This is intended for diagnosis when the UI appears connected but a button
+    click does not propagate to target control.
+    """
+    return bridge.call("trigger_live_capture", {"button_name": button_name})
+
+
+@mcp.tool
 def get_draw_calls(
     include_children: bool = True,
     marker_filter: str | None = None,

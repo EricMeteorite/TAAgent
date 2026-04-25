@@ -24,6 +24,7 @@ if exist "%CONFIG_FILE%" (
         if "%%a"=="RENDERDOC_EXE" set "SAVED_RENDERDOC_EXE=%%b"
     )
 )
+if defined SAVED_RENDERDOC_EXE call :NORMALIZE_RENDERDOC_PATH SAVED_RENDERDOC_EXE
 
 :MENU
 cls
@@ -47,6 +48,7 @@ echo   -- RenderDoc -----------------------------------------------
 echo.
 echo    [6]  启动 RenderDoc (本地隔离模式)
 echo    [7]  启动 RenderDoc MCP 服务
+echo    [10]  触发当前 Live Capture 抓帧
 echo.
 echo   -- 设置 / 维护 --------------------------------------------
 echo.
@@ -80,6 +82,7 @@ if /i "%CHOICE%"=="4" goto DO_SHOW_SNIPPET
 if /i "%CHOICE%"=="5" goto DO_REMOVE_PLUGIN
 if /i "%CHOICE%"=="6" goto DO_OPEN_RENDERDOC
 if /i "%CHOICE%"=="7" goto DO_START_RENDERDOC_MCP
+if /i "%CHOICE%"=="10" goto DO_TRIGGER_RENDERDOC_CAPTURE
 if /i "%CHOICE%"=="8" goto DO_SET_PROJECT
 if /i "%CHOICE%"=="9" goto DO_SET_RENDERDOC
 if /i "%CHOICE%"=="0" goto DO_FULL_UNINSTALL
@@ -241,6 +244,7 @@ echo   启动 RenderDoc (本地隔离模式)
 echo  ============================================
 echo.
 if defined SAVED_RENDERDOC_EXE (
+    call :NORMALIZE_RENDERDOC_PATH SAVED_RENDERDOC_EXE
     powershell -ExecutionPolicy Bypass -File "%TOOLS%\open_renderdoc_local.ps1" -RenderDocExe "%SAVED_RENDERDOC_EXE%"
 ) else (
     powershell -ExecutionPolicy Bypass -File "%TOOLS%\open_renderdoc_local.ps1"
@@ -274,6 +278,34 @@ echo.
 powershell -ExecutionPolicy Bypass -File "%TOOLS%\start_renderdoc_mcp.ps1"
 echo.
 echo  服务已停止。
+pause
+goto MENU
+
+:: ============================================================
+:: [10] 触发当前 RenderDoc Live Capture 抓帧
+:: ============================================================
+:DO_TRIGGER_RENDERDOC_CAPTURE
+cls
+echo.
+echo  ============================================
+echo   触发当前 RenderDoc Live Capture 抓帧
+echo  ============================================
+echo.
+echo  提示：
+echo    1. 请先用 [6] 启动 RenderDoc
+echo    2. 请先连到目标的 Live Capture 窗口
+echo    3. 请等待该窗口显示 Established
+echo.
+powershell -ExecutionPolicy Bypass -File "%TOOLS%\trigger_renderdoc_live_capture.ps1"
+if errorlevel 1 (
+    echo.
+    echo  [错误] 触发抓帧失败。
+    echo  请确认当前打开的是目标进程的 Live Capture 窗口，且连接状态已经是 Established。
+) else (
+    echo.
+    echo  [完成] 已向当前 Live Capture 窗口发送抓帧指令。
+)
+echo.
 pause
 goto MENU
 
@@ -342,9 +374,16 @@ if not defined NEW_RDC (
     goto MENU
 )
 set "NEW_RDC=%NEW_RDC:"=%"
+call :NORMALIZE_RENDERDOC_PATH NEW_RDC
 if not exist "%NEW_RDC%" (
     echo.
     echo  [错误] 文件不存在: %NEW_RDC%
+    pause
+    goto MENU
+)
+if exist "%NEW_RDC%\*" (
+    echo.
+    echo  [错误] 请输入 qrenderdoc.exe 的完整路径，或输入包含 qrenderdoc.exe 的 RenderDoc 文件夹。
     pause
     goto MENU
 )
@@ -355,6 +394,23 @@ echo  [完成] RenderDoc 路径已保存为: %SAVED_RENDERDOC_EXE%
 echo.
 pause
 goto MENU
+
+:: ============================================================
+:: 规范化 RenderDoc 路径
+:: - 去掉拖拽时带入的引号
+:: - 去掉尾部斜杠，避免传给 PowerShell 时截坏引号
+:: - 如果传入的是目录，则自动补成 qrenderdoc.exe / renderdocui.exe
+:: ============================================================
+:NORMALIZE_RENDERDOC_PATH
+setlocal EnableDelayedExpansion
+call set "VALUE=%%%~1%%"
+set "VALUE=%VALUE:"=%"
+if defined VALUE if "!VALUE:~-1!"=="\" set "VALUE=!VALUE:~0,-1!"
+if defined VALUE if "!VALUE:~-1!"=="/" set "VALUE=!VALUE:~0,-1!"
+if exist "!VALUE!\qrenderdoc.exe" set "VALUE=!VALUE!\qrenderdoc.exe"
+if not exist "!VALUE!" if exist "!VALUE!\renderdocui.exe" set "VALUE=!VALUE!\renderdocui.exe"
+endlocal & set "%~1=%VALUE%"
+exit /b
 
 :: ============================================================
 :: [0] 完全卸载

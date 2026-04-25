@@ -4,6 +4,13 @@ Capture management service for RenderDoc.
 
 import renderdoc as rd
 
+try:
+    from PySide2.QtWidgets import QApplication, QAbstractButton, QLabel
+except ImportError:  # pragma: no cover - only available inside RenderDoc UI
+    QApplication = None
+    QAbstractButton = None
+    QLabel = None
+
 
 class CaptureManager:
     """Capture management service"""
@@ -144,4 +151,101 @@ class CaptureManager:
         except Exception:
             pass
 
+        return result
+
+    def get_live_capture_ui_state(self):
+        """Inspect live-capture related widgets in the current RenderDoc UI."""
+        if QApplication is None:
+            raise ValueError("PySide2 is not available in this RenderDoc environment")
+
+        app = QApplication.instance()
+        if app is None:
+            raise ValueError("QApplication is not available")
+
+        widget_names = {
+            "triggerImmediateCapture",
+            "triggerDelayedCapture",
+            "queueCap",
+            "cycleActiveWindow",
+            "connectionStatus",
+            "target",
+        }
+
+        widgets = []
+        for widget in app.allWidgets():
+            name = widget.objectName()
+            if name not in widget_names:
+                continue
+
+            entry = {
+                "name": name,
+                "class": type(widget).__name__,
+                "enabled": bool(widget.isEnabled()),
+                "visible": bool(widget.isVisible()),
+                "window_title": widget.window().windowTitle(),
+            }
+
+            if QAbstractButton is not None and isinstance(widget, QAbstractButton):
+                entry["text"] = widget.text()
+            elif QLabel is not None and isinstance(widget, QLabel):
+                entry["text"] = widget.text()
+            else:
+                try:
+                    entry["text"] = widget.text()
+                except Exception:
+                    entry["text"] = ""
+
+            widgets.append(entry)
+
+        widgets.sort(key=lambda item: (item["window_title"], item["name"]))
+        return {"widgets": widgets, "count": len(widgets)}
+
+    def trigger_live_capture(self, button_name="triggerImmediateCapture"):
+        """Programmatically click a live capture button."""
+        if QApplication is None or QAbstractButton is None:
+            raise ValueError("PySide2 button interaction is not available")
+
+        app = QApplication.instance()
+        if app is None:
+            raise ValueError("QApplication is not available")
+
+        candidates = []
+        for widget in app.allWidgets():
+            if not isinstance(widget, QAbstractButton):
+                continue
+            if widget.objectName() != button_name:
+                continue
+            candidates.append(widget)
+
+        if not candidates:
+            return {
+                "success": False,
+                "reason": "button_not_found",
+                "button_name": button_name,
+            }
+
+        preferred = None
+        for widget in candidates:
+            if widget.isVisible() and widget.isEnabled():
+                preferred = widget
+                break
+
+        if preferred is None:
+            preferred = candidates[0]
+
+        result = {
+            "button_name": button_name,
+            "enabled": bool(preferred.isEnabled()),
+            "visible": bool(preferred.isVisible()),
+            "window_title": preferred.window().windowTitle(),
+            "text": preferred.text(),
+        }
+
+        if not preferred.isEnabled():
+            result["success"] = False
+            result["reason"] = "button_disabled"
+            return result
+
+        preferred.click()
+        result["success"] = True
         return result
