@@ -126,7 +126,6 @@ class UnrealConnection:
         self.socket.settimeout(timeout)
         
         chunks = []
-        total_bytes = 0
         start_time = time.time()
         
         try:
@@ -153,7 +152,6 @@ class UnrealConnection:
                     break
                 
                 chunks.append(chunk)
-                total_bytes += len(chunk)
                 
                 data = b''.join(chunks)
                 try:
@@ -208,7 +206,7 @@ class UnrealConnection:
                     "type": command,
                     "params": params or {}
                 }
-                command_json = json.dumps(command_obj)
+                command_json = json.dumps(command_obj) + "\n"
                 
                 logger.info(f"Sending command (attempt {attempt + 1}): {command}")
                 
