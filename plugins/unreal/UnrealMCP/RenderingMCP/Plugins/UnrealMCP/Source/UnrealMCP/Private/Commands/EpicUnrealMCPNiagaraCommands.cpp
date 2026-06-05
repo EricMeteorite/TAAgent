@@ -51,6 +51,7 @@
 #include "NiagaraNodeOutput.h"
 #include "NiagaraNodeFunctionCall.h"
 #include "NiagaraNodeOp.h"
+#include "NiagaraNodeParameterMapSet.h"
 #include "NiagaraNodeCustomHlsl.h"
 #include "NiagaraScriptSource.h"
 #include "EdGraph/EdGraphPin.h"
@@ -1838,7 +1839,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::ProcessParameterOperation
     TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject);
     
     FString EmitterName = Op->GetStringField(TEXT("emitter"));
-    FString ScriptType = Op->GetStringField(TEXT("script")); // "spawn" or "update"
+    FString ScriptType = Op->GetStringField(TEXT("script")); // "spawn", "update", or "event"
     FString ParamName = Op->GetStringField(TEXT("name"));
     
     FNiagaraEmitterHandle* Handle = FindEmitterHandle(System, EmitterName);
@@ -1865,6 +1866,17 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::ProcessParameterOperation
     else if (ScriptType.ToLower() == TEXT("update"))
     {
         Script = EmitterData->UpdateScriptProps.Script;
+    }
+    else if (ScriptType.ToLower() == TEXT("event"))
+    {
+        int32 EventIndex = 0;
+        Op->TryGetNumberField(TEXT("event_index"), EventIndex);
+
+        const TArray<FNiagaraEventScriptProperties>& EventHandlers = EmitterData->GetEventHandlers();
+        if (EventHandlers.IsValidIndex(EventIndex))
+        {
+            Script = EventHandlers[EventIndex].Script;
+        }
     }
     
     if (!Script)
@@ -3117,6 +3129,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraGraph(
     // Get the script
     UNiagaraScript* Script = nullptr;
     UNiagaraSystem* NiagaraSystem = nullptr;
+    FVersionedNiagaraEmitterData* EmitterDataForOps = nullptr;
     FGuid EmitterHandleId;  // Store emitter ID for module operations
     
     if (bUseStandaloneScript)
@@ -3150,8 +3163,8 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraGraph(
         
         EmitterHandleId = Handle->GetId();  // Save for later module operations
 
-        FVersionedNiagaraEmitterData* EmitterData = Handle->GetEmitterData();
-        if (!EmitterData)
+        EmitterDataForOps = Handle->GetEmitterData();
+        if (!EmitterDataForOps)
         {
             Result->SetBoolField(TEXT("success"), false);
             Result->SetStringField(TEXT("error"), TEXT("Failed to get emitter data"));
@@ -3160,11 +3173,11 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraGraph(
 
         if (ScriptType.ToLower() == TEXT("spawn"))
         {
-            Script = EmitterData->SpawnScriptProps.Script;
+            Script = EmitterDataForOps->SpawnScriptProps.Script;
         }
         else if (ScriptType.ToLower() == TEXT("update"))
         {
-            Script = EmitterData->UpdateScriptProps.Script;
+            Script = EmitterDataForOps->UpdateScriptProps.Script;
         }
 
         if (!Script)
@@ -3273,6 +3286,183 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraGraph(
                             FailCount++;
                         }
                     }
+                }
+            }
+        }
+        else if (Action == TEXT("add_module_to_usage"))
+        {
+            FString ModulePath;
+            FString UsageString;
+            if (!Op->TryGetStringField(TEXT("module_path"), ModulePath))
+            {
+                OpResult->SetBoolField(TEXT("success"), false);
+                OpResult->SetStringField(TEXT("error"), TEXT("Missing module_path"));
+                FailCount++;
+            }
+            else if (!Op->TryGetStringField(TEXT("usage"), UsageString))
+            {
+                OpResult->SetBoolField(TEXT("success"), false);
+                OpResult->SetStringField(TEXT("error"), TEXT("Missing usage"));
+                FailCount++;
+            }
+            else
+            {
+                UNiagaraScript* ModuleScript = LoadObject<UNiagaraScript>(nullptr, *ModulePath);
+                if (!ModuleScript)
+                {
+                    OpResult->SetBoolField(TEXT("success"), false);
+                    OpResult->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to load module: %s"), *ModulePath));
+                    FailCount++;
+                }
+                else
+                {
+                    const FString NormalizedUsage = UsageString.ToLower();
+                    ENiagaraScriptUsage TargetUsage = ENiagaraScriptUsage::ParticleUpdateScript;
+                    if (NormalizedUsage == TEXT("emitter_update") || NormalizedUsage == TEXT("emitterupdatescript"))
+                    {
+                        TargetUsage = ENiagaraScriptUsage::EmitterUpdateScript;
+                    }
+                    else if (NormalizedUsage == TEXT("emitter_spawn") || NormalizedUsage == TEXT("emitterspawnscript"))
+                    {
+                        TargetUsage = ENiagaraScriptUsage::EmitterSpawnScript;
+                    }
+                    else if (NormalizedUsage == TEXT("particle_spawn") || NormalizedUsage == TEXT("spawn") || NormalizedUsage == TEXT("particlespawnscript"))
+                    {
+                        TargetUsage = ENiagaraScriptUsage::ParticleSpawnScript;
+                    }
+                    else if (NormalizedUsage == TEXT("particle_update") || NormalizedUsage == TEXT("update") || NormalizedUsage == TEXT("particleupdatescript"))
+                    {
+                        TargetUsage = ENiagaraScriptUsage::ParticleUpdateScript;
+                    }
+                    else if (NormalizedUsage == TEXT("particle_event") || NormalizedUsage == TEXT("event") || NormalizedUsage == TEXT("particleeventscript"))
+                    {
+                        TargetUsage = ENiagaraScriptUsage::ParticleEventScript;
+                    }
+
+                    UNiagaraNodeOutput* OutputNode = nullptr;
+                    for (UEdGraphNode* NodeBase : Graph->Nodes)
+                    {
+                        UNiagaraNodeOutput* Node = Cast<UNiagaraNodeOutput>(NodeBase);
+                        if (Node && Node->GetUsage() == TargetUsage)
+                        {
+                            OutputNode = Node;
+                            break;
+                        }
+                    }
+
+                    if (!OutputNode)
+                    {
+                        OpResult->SetBoolField(TEXT("success"), false);
+                        OpResult->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to find output node for usage: %s"), *UsageString));
+                        FailCount++;
+                    }
+                    else
+                    {
+                        UNiagaraNodeFunctionCall* NewModule = FNiagaraStackGraphUtilities::AddScriptModuleToStack(
+                            ModuleScript,
+                            *OutputNode,
+                            INDEX_NONE,
+                            FString(),
+                            FGuid()
+                        );
+
+                        if (NewModule)
+                        {
+                            Graph->NotifyGraphChanged();
+                            Script->Modify();
+                            OpResult->SetBoolField(TEXT("success"), true);
+                            OpResult->SetStringField(TEXT("action"), TEXT("add_module_to_usage"));
+                            OpResult->SetStringField(TEXT("usage"), UsageString);
+                            OpResult->SetStringField(TEXT("module_path"), ModulePath);
+                            OpResult->SetStringField(TEXT("module_name"), NewModule->GetName());
+                            SuccessCount++;
+                        }
+                        else
+                        {
+                            OpResult->SetBoolField(TEXT("success"), false);
+                            OpResult->SetStringField(TEXT("error"), TEXT("Failed to add module to stack"));
+                            FailCount++;
+                        }
+                    }
+                }
+            }
+        }
+        else if (Action == TEXT("set_event_handler_options"))
+        {
+            if (!EmitterDataForOps)
+            {
+                OpResult->SetBoolField(TEXT("success"), false);
+                OpResult->SetStringField(TEXT("error"), TEXT("set_event_handler_options requires asset_path + emitter"));
+                FailCount++;
+            }
+            else
+            {
+                int32 EventIndex = 0;
+                Op->TryGetNumberField(TEXT("event_index"), EventIndex);
+
+                if (!EmitterDataForOps->EventHandlerScriptProps.IsValidIndex(EventIndex))
+                {
+                    OpResult->SetBoolField(TEXT("success"), false);
+                    OpResult->SetStringField(TEXT("error"), FString::Printf(TEXT("Event handler index out of range: %d"), EventIndex));
+                    FailCount++;
+                }
+                else
+                {
+                    FNiagaraEventScriptProperties& EventHandler = EmitterDataForOps->EventHandlerScriptProps[EventIndex];
+                    Script->Modify();
+                    if (NiagaraSystem)
+                    {
+                        NiagaraSystem->Modify();
+                    }
+
+                    FString ExecutionModeString;
+                    if (Op->TryGetStringField(TEXT("execution_mode"), ExecutionModeString))
+                    {
+                        const FString NormalizedMode = ExecutionModeString.ToLower();
+                        if (NormalizedMode == TEXT("spawnedparticles") || NormalizedMode == TEXT("spawned_particles"))
+                        {
+                            EventHandler.ExecutionMode = EScriptExecutionMode::SpawnedParticles;
+                        }
+                        else if (NormalizedMode == TEXT("singleparticle") || NormalizedMode == TEXT("single_particle"))
+                        {
+                            EventHandler.ExecutionMode = EScriptExecutionMode::SingleParticle;
+                        }
+                        else
+                        {
+                            EventHandler.ExecutionMode = EScriptExecutionMode::EveryParticle;
+                        }
+                    }
+
+                    int32 IntValue = 0;
+                    if (Op->TryGetNumberField(TEXT("spawn_number"), IntValue))
+                    {
+                        EventHandler.SpawnNumber = FMath::Max(0, IntValue);
+                    }
+                    if (Op->TryGetNumberField(TEXT("max_events_per_frame"), IntValue))
+                    {
+                        EventHandler.MaxEventsPerFrame = FMath::Max(0, IntValue);
+                    }
+                    if (Op->TryGetNumberField(TEXT("min_spawn_number"), IntValue))
+                    {
+                        EventHandler.MinSpawnNumber = FMath::Max(0, IntValue);
+                    }
+
+                    bool BoolValue = false;
+                    if (Op->TryGetBoolField(TEXT("random_spawn_number"), BoolValue))
+                    {
+                        EventHandler.bRandomSpawnNumber = BoolValue;
+                    }
+                    if (Op->TryGetBoolField(TEXT("update_attribute_initial_values"), BoolValue))
+                    {
+                        EventHandler.UpdateAttributeInitialValues = BoolValue;
+                    }
+
+                    OpResult->SetBoolField(TEXT("success"), true);
+                    OpResult->SetStringField(TEXT("action"), TEXT("set_event_handler_options"));
+                    OpResult->SetNumberField(TEXT("event_index"), EventIndex);
+                    OpResult->SetNumberField(TEXT("spawn_number"), EventHandler.SpawnNumber);
+                    OpResult->SetNumberField(TEXT("max_events_per_frame"), EventHandler.MaxEventsPerFrame);
+                    SuccessCount++;
                 }
             }
         }
@@ -3395,9 +3585,56 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraGraph(
                     }
                     else
                     {
-                        OpResult->SetBoolField(TEXT("success"), false);
-                        OpResult->SetStringField(TEXT("error"), TEXT("Unsupported parameter value type"));
-                        FailCount++;
+                        bool BoolValue = false;
+                        if (ValueJson->TryGetBool(BoolValue))
+                        {
+                            FNiagaraVariable Var(FNiagaraTypeDefinition::GetBoolDef(), *ParamName);
+                            Var.SetValue(BoolValue);
+                            bool bAddIfMissing = true;
+                            Script->RapidIterationParameters.SetParameterData(Var.GetData(), Var, bAddIfMissing);
+
+                            OpResult->SetBoolField(TEXT("success"), true);
+                            OpResult->SetStringField(TEXT("action"), TEXT("set_parameter"));
+                            OpResult->SetStringField(TEXT("name"), ParamName);
+                            SuccessCount++;
+                            Script->Modify();
+                        }
+                        else
+                        {
+                            const TArray<TSharedPtr<FJsonValue>>* ArrayValue = nullptr;
+                            if (ValueJson->TryGetArray(ArrayValue) && ArrayValue && ArrayValue->Num() >= 3)
+                            {
+                                FVector3f VectorValue(
+                                    static_cast<float>((*ArrayValue)[0]->AsNumber()),
+                                    static_cast<float>((*ArrayValue)[1]->AsNumber()),
+                                    static_cast<float>((*ArrayValue)[2]->AsNumber()));
+
+                                FNiagaraTypeDefinition TypeDef = FNiagaraTypeDefinition::GetVec3Def();
+                                FString TypeName;
+                                Op->TryGetStringField(TEXT("type"), TypeName);
+                                if (TypeName.Equals(TEXT("position"), ESearchCase::IgnoreCase))
+                                {
+                                    TypeDef = FNiagaraTypeDefinition::GetPositionDef();
+                                }
+
+                                FNiagaraVariable Var(TypeDef, *ParamName);
+                                Var.SetValue(VectorValue);
+                                bool bAddIfMissing = true;
+                                Script->RapidIterationParameters.SetParameterData(Var.GetData(), Var, bAddIfMissing);
+
+                                OpResult->SetBoolField(TEXT("success"), true);
+                                OpResult->SetStringField(TEXT("action"), TEXT("set_parameter"));
+                                OpResult->SetStringField(TEXT("name"), ParamName);
+                                SuccessCount++;
+                                Script->Modify();
+                            }
+                            else
+                            {
+                                OpResult->SetBoolField(TEXT("success"), false);
+                                OpResult->SetStringField(TEXT("error"), TEXT("Unsupported parameter value type"));
+                                FailCount++;
+                            }
+                        }
                     }
                 }
                 else
@@ -3406,6 +3643,829 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraGraph(
                     OpResult->SetStringField(TEXT("error"), TEXT("Missing parameter value"));
                     FailCount++;
                 }
+            }
+        }
+        else if (Action == TEXT("restore_orbit_delta_counter"))
+        {
+            FString FromTimeSource = TEXT("System.Age");
+            Op->TryGetStringField(TEXT("from_time_source"), FromTimeSource);
+
+            FString TimeSource = TEXT("Engine.DeltaTime");
+            Op->TryGetStringField(TEXT("time_source"), TimeSource);
+
+            FString CounterPinName = TEXT("Particles.Module.IncrementingCounter");
+            Op->TryGetStringField(TEXT("counter_pin"), CounterPinName);
+
+            Graph->Modify();
+            Script->Modify();
+
+            int32 TimePinsRenamed = 0;
+            int32 CounterLinksAdded = 0;
+            int32 CounterLinksRemoved = 0;
+
+            UEdGraphPin* CounterOutputPin = nullptr;
+            UEdGraphPin* CounterAddInputPin = nullptr;
+
+            for (UEdGraphNode* NodeBase : Graph->Nodes)
+            {
+                if (!NodeBase)
+                {
+                    continue;
+                }
+
+                for (UEdGraphPin* Pin : NodeBase->Pins)
+                {
+                    if (!Pin)
+                    {
+                        continue;
+                    }
+
+                    if (Pin->Direction == EGPD_Output && Pin->PinName.ToString() == FromTimeSource)
+                    {
+                        NodeBase->Modify();
+                        Pin->PinName = FName(*TimeSource);
+                        Pin->PinFriendlyName = FText::FromString(TimeSource);
+                        TimePinsRenamed++;
+                    }
+
+                    if (Pin->Direction == EGPD_Output && Pin->PinName.ToString() == CounterPinName)
+                    {
+                        bool bPreferredCounterSource = false;
+                        for (UEdGraphPin* SiblingPin : NodeBase->Pins)
+                        {
+                            if (SiblingPin && SiblingPin->Direction == EGPD_Output)
+                            {
+                                const FString SiblingName = SiblingPin->PinName.ToString();
+                                if (SiblingName == TEXT("Module.Rotation Rate") || SiblingName == TEXT("Module.Delta Time"))
+                                {
+                                    bPreferredCounterSource = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // The counter must come from the upstream ParameterMapGet. Using a downstream get
+                        // creates a graph cycle: Set Counter -> Get Counter -> Add -> Set Counter.
+                        if (!CounterOutputPin || bPreferredCounterSource)
+                        {
+                            CounterOutputPin = Pin;
+                        }
+                    }
+                }
+            }
+
+            for (UEdGraphNode* NodeBase : Graph->Nodes)
+            {
+                UNiagaraNodeOp* OpNode = Cast<UNiagaraNodeOp>(NodeBase);
+                if (!OpNode)
+                {
+                    continue;
+                }
+
+                UEdGraphPin* ResultPin = nullptr;
+                UEdGraphPin* CandidateBPin = nullptr;
+                for (UEdGraphPin* Pin : NodeBase->Pins)
+                {
+                    if (!Pin)
+                    {
+                        continue;
+                    }
+
+                    if (Pin->Direction == EGPD_Output && Pin->PinName.ToString() == TEXT("Result"))
+                    {
+                        ResultPin = Pin;
+                    }
+                    else if (Pin->Direction == EGPD_Input && Pin->PinName.ToString() == TEXT("B"))
+                    {
+                        CandidateBPin = Pin;
+                    }
+                }
+
+                if (!ResultPin || !CandidateBPin)
+                {
+                    continue;
+                }
+
+                bool bWritesCounter = false;
+                for (UEdGraphPin* LinkedPin : ResultPin->LinkedTo)
+                {
+                    if (LinkedPin && LinkedPin->Direction == EGPD_Input && LinkedPin->PinName.ToString() == CounterPinName)
+                    {
+                        bWritesCounter = true;
+                        break;
+                    }
+                }
+
+                if (bWritesCounter)
+                {
+                    CounterAddInputPin = CandidateBPin;
+                    break;
+                }
+            }
+
+            if (CounterOutputPin && CounterAddInputPin && !CounterAddInputPin->LinkedTo.Contains(CounterOutputPin))
+            {
+                if (UEdGraphNode* CounterNode = CounterOutputPin->GetOwningNode())
+                {
+                    CounterNode->Modify();
+                }
+                if (UEdGraphNode* AddNode = CounterAddInputPin->GetOwningNode())
+                {
+                    AddNode->Modify();
+                }
+
+                TArray<UEdGraphPin*> ExistingCounterLinks = CounterAddInputPin->LinkedTo;
+                for (UEdGraphPin* ExistingPin : ExistingCounterLinks)
+                {
+                    if (ExistingPin && ExistingPin != CounterOutputPin && ExistingPin->PinName.ToString() == CounterPinName)
+                    {
+                        if (UEdGraphNode* ExistingNode = ExistingPin->GetOwningNode())
+                        {
+                            ExistingNode->Modify();
+                        }
+                        ExistingPin->BreakLinkTo(CounterAddInputPin);
+                        CounterLinksRemoved++;
+                    }
+                }
+
+                if (!CounterAddInputPin->LinkedTo.Contains(CounterOutputPin))
+                {
+                    CounterOutputPin->MakeLinkTo(CounterAddInputPin);
+                    CounterLinksAdded++;
+                }
+            }
+            else if (CounterOutputPin && CounterAddInputPin)
+            {
+                TArray<UEdGraphPin*> ExistingCounterLinks = CounterAddInputPin->LinkedTo;
+                for (UEdGraphPin* ExistingPin : ExistingCounterLinks)
+                {
+                    if (ExistingPin && ExistingPin != CounterOutputPin && ExistingPin->PinName.ToString() == CounterPinName)
+                    {
+                        if (UEdGraphNode* ExistingNode = ExistingPin->GetOwningNode())
+                        {
+                            ExistingNode->Modify();
+                        }
+                        if (UEdGraphNode* AddNode = CounterAddInputPin->GetOwningNode())
+                        {
+                            AddNode->Modify();
+                        }
+                        ExistingPin->BreakLinkTo(CounterAddInputPin);
+                        CounterLinksRemoved++;
+                    }
+                }
+            }
+
+            if (CounterLinksRemoved > 0 && CounterOutputPin && CounterAddInputPin && !CounterAddInputPin->LinkedTo.Contains(CounterOutputPin))
+            {
+                if (UEdGraphNode* CounterNode = CounterOutputPin->GetOwningNode())
+                {
+                    CounterNode->Modify();
+                }
+                if (UEdGraphNode* AddNode = CounterAddInputPin->GetOwningNode())
+                {
+                    AddNode->Modify();
+                }
+                CounterOutputPin->MakeLinkTo(CounterAddInputPin);
+                CounterLinksAdded++;
+            }
+
+            if (TimePinsRenamed > 0 || CounterLinksAdded > 0 || CounterLinksRemoved > 0)
+            {
+                Graph->NotifyGraphChanged();
+                Script->InvalidateCompileResults(TEXT("TAAgent restored orbit delta counter"));
+                if (EmitterDataForOps)
+                {
+                    EmitterDataForOps->InvalidateCompileResults();
+                }
+                OpResult->SetBoolField(TEXT("success"), true);
+                OpResult->SetStringField(TEXT("action"), TEXT("restore_orbit_delta_counter"));
+                OpResult->SetStringField(TEXT("time_source"), TimeSource);
+                OpResult->SetNumberField(TEXT("time_pins_renamed"), TimePinsRenamed);
+                OpResult->SetNumberField(TEXT("counter_links_added"), CounterLinksAdded);
+                OpResult->SetNumberField(TEXT("counter_links_removed"), CounterLinksRemoved);
+                SuccessCount++;
+            }
+            else
+            {
+                OpResult->SetBoolField(TEXT("success"), false);
+                OpResult->SetStringField(TEXT("error"), TEXT("No orbit delta counter changes were applied"));
+                FailCount++;
+            }
+        }
+        else if (Action == TEXT("patch_orbit_absolute_time"))
+        {
+            FString FromTimeSource = TEXT("Engine.DeltaTime");
+            Op->TryGetStringField(TEXT("from_time_source"), FromTimeSource);
+
+            FString TimeSource = TEXT("Emitter.Age");
+            Op->TryGetStringField(TEXT("time_source"), TimeSource);
+
+            FString CounterPinName = TEXT("Particles.Module.IncrementingCounter");
+            Op->TryGetStringField(TEXT("counter_pin"), CounterPinName);
+
+            FString CounterTargetPinName = TEXT("B");
+            Op->TryGetStringField(TEXT("counter_target_pin"), CounterTargetPinName);
+
+            Graph->Modify();
+            Script->Modify();
+
+            int32 TimePinsRenamed = 0;
+            int32 CounterLinksRemoved = 0;
+
+            for (UEdGraphNode* NodeBase : Graph->Nodes)
+            {
+                if (!NodeBase)
+                {
+                    continue;
+                }
+
+                for (UEdGraphPin* Pin : NodeBase->Pins)
+                {
+                    if (!Pin)
+                    {
+                        continue;
+                    }
+
+                    if (Pin->Direction == EGPD_Output && Pin->PinName.ToString() == FromTimeSource)
+                    {
+                        NodeBase->Modify();
+                        Pin->PinName = FName(*TimeSource);
+                        Pin->PinFriendlyName = FText::FromString(TimeSource);
+                        TimePinsRenamed++;
+                    }
+
+                    if (Pin->Direction == EGPD_Output && Pin->PinName.ToString() == CounterPinName)
+                    {
+                        TArray<UEdGraphPin*> LinkedPins = Pin->LinkedTo;
+                        for (UEdGraphPin* LinkedPin : LinkedPins)
+                        {
+                            if (!LinkedPin)
+                            {
+                                continue;
+                            }
+
+                            if (LinkedPin->Direction == EGPD_Input && LinkedPin->PinName.ToString() == CounterTargetPinName)
+                            {
+                                NodeBase->Modify();
+                                if (UEdGraphNode* LinkedNode = LinkedPin->GetOwningNode())
+                                {
+                                    LinkedNode->Modify();
+                                }
+                                Pin->BreakLinkTo(LinkedPin);
+                                LinkedPin->DefaultValue = TEXT("0.0");
+                                LinkedPin->AutogeneratedDefaultValue = TEXT("0.0");
+                                LinkedPin->DefaultTextValue = FText::FromString(TEXT("0.0"));
+                                CounterLinksRemoved++;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (TimePinsRenamed > 0)
+            {
+                Graph->NotifyGraphChanged();
+                Script->InvalidateCompileResults(TEXT("TAAgent patched orbit absolute time"));
+                if (EmitterDataForOps)
+                {
+                    EmitterDataForOps->InvalidateCompileResults();
+                }
+                OpResult->SetBoolField(TEXT("success"), true);
+                OpResult->SetStringField(TEXT("action"), TEXT("patch_orbit_absolute_time"));
+                OpResult->SetStringField(TEXT("time_source"), TimeSource);
+                OpResult->SetNumberField(TEXT("time_pins_renamed"), TimePinsRenamed);
+                OpResult->SetNumberField(TEXT("counter_links_removed"), CounterLinksRemoved);
+                SuccessCount++;
+            }
+            else
+            {
+                OpResult->SetBoolField(TEXT("success"), false);
+                OpResult->SetStringField(TEXT("error"), FString::Printf(TEXT("Could not find output pin: %s"), *FromTimeSource));
+                FailCount++;
+            }
+        }
+        else if (Action == TEXT("patch_orbit_direct_time"))
+        {
+            FString FromTimeSource = TEXT("Engine.DeltaTime");
+            Op->TryGetStringField(TEXT("from_time_source"), FromTimeSource);
+
+            FString TimeSource = TEXT("Particles.Age");
+            Op->TryGetStringField(TEXT("time_source"), TimeSource);
+
+            FString CounterPinName = TEXT("Particles.Module.IncrementingCounter");
+            Op->TryGetStringField(TEXT("counter_pin"), CounterPinName);
+
+            Graph->Modify();
+            Script->Modify();
+
+            int32 TimePinsRenamed = 0;
+            int32 AngleLinksRewired = 0;
+            int32 CounterSetNodesRemoved = 0;
+            int32 CounterAddNodesRemoved = 0;
+
+            UNiagaraNodeOp* CounterAddNode = nullptr;
+            UEdGraphPin* CounterAddInputAPin = nullptr;
+            UEdGraphPin* CounterAddResultPin = nullptr;
+            UEdGraphPin* TimeMultiplyResultPin = nullptr;
+            UNiagaraNodeOp* AngleAddNode = nullptr;
+            UEdGraphPin* AngleAddInputAPin = nullptr;
+            UNiagaraNodeParameterMapSet* CounterSetNode = nullptr;
+
+            for (UEdGraphNode* NodeBase : Graph->Nodes)
+            {
+                if (!NodeBase)
+                {
+                    continue;
+                }
+
+                for (UEdGraphPin* Pin : NodeBase->Pins)
+                {
+                    if (Pin && Pin->Direction == EGPD_Output && Pin->PinName.ToString() == FromTimeSource)
+                    {
+                        NodeBase->Modify();
+                        Pin->PinName = FName(*TimeSource);
+                        Pin->PinFriendlyName = FText::FromString(TimeSource);
+                        TimePinsRenamed++;
+                    }
+                }
+
+                if (UNiagaraNodeOp* OpNode = Cast<UNiagaraNodeOp>(NodeBase))
+                {
+                    UEdGraphPin* ResultPin = nullptr;
+                    UEdGraphPin* InputAPin = nullptr;
+                    for (UEdGraphPin* Pin : NodeBase->Pins)
+                    {
+                        if (!Pin)
+                        {
+                            continue;
+                        }
+                        if (Pin->Direction == EGPD_Output && Pin->PinName.ToString() == TEXT("Result"))
+                        {
+                            ResultPin = Pin;
+                        }
+                        else if (Pin->Direction == EGPD_Input && Pin->PinName.ToString() == TEXT("A"))
+                        {
+                            InputAPin = Pin;
+                        }
+                    }
+
+                    if (ResultPin)
+                    {
+                        int32 AngleTargets = 0;
+                        bool bWritesCounter = false;
+                        for (UEdGraphPin* LinkedPin : ResultPin->LinkedTo)
+                        {
+                            if (!LinkedPin)
+                            {
+                                continue;
+                            }
+                            const FString LinkedName = LinkedPin->PinName.ToString();
+                            if (LinkedName == TEXT("Angle"))
+                            {
+                                AngleTargets++;
+                            }
+                            else if (LinkedName == CounterPinName)
+                            {
+                                bWritesCounter = true;
+                            }
+                        }
+
+                        if (AngleTargets >= 1 && InputAPin)
+                        {
+                            AngleAddNode = OpNode;
+                            AngleAddInputAPin = InputAPin;
+                        }
+
+                        if (bWritesCounter)
+                        {
+                            CounterAddNode = OpNode;
+                            CounterAddInputAPin = InputAPin;
+                            CounterAddResultPin = ResultPin;
+                        }
+                    }
+                }
+                else if (UNiagaraNodeParameterMapSet* SetNode = Cast<UNiagaraNodeParameterMapSet>(NodeBase))
+                {
+                    for (UEdGraphPin* Pin : NodeBase->Pins)
+                    {
+                        if (Pin && Pin->Direction == EGPD_Input && Pin->PinName.ToString() == CounterPinName)
+                        {
+                            CounterSetNode = SetNode;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (CounterAddInputAPin && CounterAddInputAPin->LinkedTo.Num() > 0)
+            {
+                TimeMultiplyResultPin = CounterAddInputAPin->LinkedTo[0];
+            }
+
+            if (TimeMultiplyResultPin && AngleAddInputAPin)
+            {
+                if (UEdGraphNode* SourceNode = TimeMultiplyResultPin->GetOwningNode())
+                {
+                    SourceNode->Modify();
+                }
+                if (UEdGraphNode* AngleNode = AngleAddInputAPin->GetOwningNode())
+                {
+                    AngleNode->Modify();
+                }
+
+                TArray<UEdGraphPin*> ExistingLinks = AngleAddInputAPin->LinkedTo;
+                for (UEdGraphPin* ExistingPin : ExistingLinks)
+                {
+                    if (ExistingPin)
+                    {
+                        ExistingPin->BreakLinkTo(AngleAddInputAPin);
+                    }
+                }
+                TimeMultiplyResultPin->MakeLinkTo(AngleAddInputAPin);
+                AngleLinksRewired++;
+            }
+
+            if (CounterSetNode)
+            {
+                UEdGraphPin* SourcePin = nullptr;
+                UEdGraphPin* DestPin = nullptr;
+                UEdGraphPin* CounterInputPin = nullptr;
+                for (UEdGraphPin* Pin : CounterSetNode->Pins)
+                {
+                    if (!Pin)
+                    {
+                        continue;
+                    }
+                    if (Pin->Direction == EGPD_Input && Pin->PinName.ToString() == TEXT("Source"))
+                    {
+                        SourcePin = Pin;
+                    }
+                    else if (Pin->Direction == EGPD_Output && Pin->PinName.ToString() == TEXT("Dest"))
+                    {
+                        DestPin = Pin;
+                    }
+                    else if (Pin->Direction == EGPD_Input && Pin->PinName.ToString() == CounterPinName)
+                    {
+                        CounterInputPin = Pin;
+                    }
+                }
+
+                const TArray<UEdGraphPin*> UpstreamPins = SourcePin ? SourcePin->LinkedTo : TArray<UEdGraphPin*>();
+                const TArray<UEdGraphPin*> DownstreamPins = DestPin ? DestPin->LinkedTo : TArray<UEdGraphPin*>();
+
+                CounterSetNode->Modify();
+                if (SourcePin)
+                {
+                    SourcePin->BreakAllPinLinks();
+                }
+                if (DestPin)
+                {
+                    DestPin->BreakAllPinLinks();
+                }
+                if (CounterInputPin)
+                {
+                    CounterInputPin->BreakAllPinLinks();
+                }
+
+                for (UEdGraphPin* UpstreamPin : UpstreamPins)
+                {
+                    if (!UpstreamPin)
+                    {
+                        continue;
+                    }
+                    for (UEdGraphPin* DownstreamPin : DownstreamPins)
+                    {
+                        if (DownstreamPin)
+                        {
+                            UpstreamPin->MakeLinkTo(DownstreamPin);
+                        }
+                    }
+                }
+
+                Graph->RemoveNode(CounterSetNode);
+                CounterSetNodesRemoved++;
+            }
+
+            if (CounterAddNode)
+            {
+                CounterAddNode->Modify();
+                for (UEdGraphPin* Pin : CounterAddNode->Pins)
+                {
+                    if (Pin)
+                    {
+                        Pin->BreakAllPinLinks();
+                    }
+                }
+                Graph->RemoveNode(CounterAddNode);
+                CounterAddNodesRemoved++;
+            }
+
+            if (TimePinsRenamed > 0 || AngleLinksRewired > 0 || CounterSetNodesRemoved > 0 || CounterAddNodesRemoved > 0)
+            {
+                Graph->NotifyGraphChanged();
+                Script->InvalidateCompileResults(TEXT("TAAgent patched orbit direct time"));
+                if (EmitterDataForOps)
+                {
+                    EmitterDataForOps->InvalidateCompileResults();
+                }
+                OpResult->SetBoolField(TEXT("success"), true);
+                OpResult->SetStringField(TEXT("action"), TEXT("patch_orbit_direct_time"));
+                OpResult->SetStringField(TEXT("time_source"), TimeSource);
+                OpResult->SetNumberField(TEXT("time_pins_renamed"), TimePinsRenamed);
+                OpResult->SetNumberField(TEXT("angle_links_rewired"), AngleLinksRewired);
+                OpResult->SetNumberField(TEXT("counter_set_nodes_removed"), CounterSetNodesRemoved);
+                OpResult->SetNumberField(TEXT("counter_add_nodes_removed"), CounterAddNodesRemoved);
+                SuccessCount++;
+            }
+            else
+            {
+                OpResult->SetBoolField(TEXT("success"), false);
+                OpResult->SetStringField(TEXT("error"), TEXT("No direct-time orbit graph changes were applied"));
+                FailCount++;
+            }
+        }
+        else if (Action == TEXT("force_orbit_output_position"))
+        {
+            FString OrbitPositionPinName = TEXT("Output.Module.OutputPosition");
+            Op->TryGetStringField(TEXT("orbit_position_pin"), OrbitPositionPinName);
+
+            FString ParticlePositionPinName = TEXT("Particles.Position");
+            Op->TryGetStringField(TEXT("particle_position_pin"), ParticlePositionPinName);
+
+            Graph->Modify();
+            Script->Modify();
+
+            UEdGraphPin* OrbitPositionOutputPin = nullptr;
+            UEdGraphPin* ParticlePositionInputPin = nullptr;
+
+            for (UEdGraphNode* NodeBase : Graph->Nodes)
+            {
+                if (!NodeBase)
+                {
+                    continue;
+                }
+
+                const bool bIsParameterMapSet = NodeBase->IsA(UNiagaraNodeParameterMapSet::StaticClass());
+
+                for (UEdGraphPin* Pin : NodeBase->Pins)
+                {
+                    if (!Pin)
+                    {
+                        continue;
+                    }
+
+                    if (Pin->Direction == EGPD_Output && Pin->PinName.ToString() == OrbitPositionPinName)
+                    {
+                        bool bPreferredOutput = false;
+                        for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+                        {
+                            if (!LinkedPin)
+                            {
+                                continue;
+                            }
+
+                            const FString LinkedPinName = LinkedPin->PinName.ToString();
+                            const FString LinkedNodeClass = LinkedPin->GetOwningNode()
+                                ? LinkedPin->GetOwningNode()->GetClass()->GetName()
+                                : FString();
+                            if (LinkedPinName.Contains(TEXT("if True")) || LinkedNodeClass.Contains(TEXT("Select")))
+                            {
+                                bPreferredOutput = true;
+                                break;
+                            }
+                        }
+
+                        if (!OrbitPositionOutputPin || bPreferredOutput)
+                        {
+                            OrbitPositionOutputPin = Pin;
+                        }
+                    }
+                    else if (Pin->Direction == EGPD_Input && Pin->PinName.ToString() == ParticlePositionPinName)
+                    {
+                        if (!ParticlePositionInputPin || bIsParameterMapSet)
+                        {
+                            ParticlePositionInputPin = Pin;
+                        }
+                    }
+                }
+            }
+
+            if (OrbitPositionOutputPin && ParticlePositionInputPin)
+            {
+                if (UEdGraphNode* SourceNode = OrbitPositionOutputPin->GetOwningNode())
+                {
+                    SourceNode->Modify();
+                }
+                if (UEdGraphNode* TargetNode = ParticlePositionInputPin->GetOwningNode())
+                {
+                    TargetNode->Modify();
+                }
+
+                int32 LinksRemoved = 0;
+                TArray<UEdGraphPin*> ExistingLinks = ParticlePositionInputPin->LinkedTo;
+                for (UEdGraphPin* ExistingPin : ExistingLinks)
+                {
+                    if (ExistingPin)
+                    {
+                        ExistingPin->BreakLinkTo(ParticlePositionInputPin);
+                        LinksRemoved++;
+                    }
+                }
+
+                OrbitPositionOutputPin->MakeLinkTo(ParticlePositionInputPin);
+
+                Graph->NotifyGraphChanged();
+                Script->InvalidateCompileResults(TEXT("TAAgent forced orbit output position"));
+                if (EmitterDataForOps)
+                {
+                    EmitterDataForOps->InvalidateCompileResults();
+                }
+
+                OpResult->SetBoolField(TEXT("success"), true);
+                OpResult->SetStringField(TEXT("action"), TEXT("force_orbit_output_position"));
+                OpResult->SetStringField(TEXT("orbit_position_pin"), OrbitPositionPinName);
+                OpResult->SetStringField(TEXT("particle_position_pin"), ParticlePositionPinName);
+                OpResult->SetNumberField(TEXT("links_removed"), LinksRemoved);
+                SuccessCount++;
+            }
+            else
+            {
+                OpResult->SetBoolField(TEXT("success"), false);
+                OpResult->SetStringField(
+                    TEXT("error"),
+                    FString::Printf(
+                        TEXT("Could not find pins: orbit=%s particle=%s"),
+                        *OrbitPositionPinName,
+                        *ParticlePositionPinName));
+                FailCount++;
+            }
+        }
+        else if (Action == TEXT("orbit_use_particle_position_center"))
+        {
+            FString ParticlePositionPinName = TEXT("Particles.Position");
+            Op->TryGetStringField(TEXT("particle_position_pin"), ParticlePositionPinName);
+
+            FString RotationCenterPinName = TEXT("Module.Rotation Center");
+            Op->TryGetStringField(TEXT("rotation_center_pin"), RotationCenterPinName);
+
+            Graph->Modify();
+            Script->Modify();
+
+            UEdGraphPin* ParticlePositionOutputPin = nullptr;
+            TArray<UEdGraphPin*> RotationCenterTargetPins;
+
+            for (UEdGraphNode* NodeBase : Graph->Nodes)
+            {
+                if (!NodeBase)
+                {
+                    continue;
+                }
+
+                for (UEdGraphPin* Pin : NodeBase->Pins)
+                {
+                    if (!Pin)
+                    {
+                        continue;
+                    }
+
+                    if (Pin->Direction == EGPD_Output && Pin->PinName.ToString() == ParticlePositionPinName)
+                    {
+                        bool bPreferredOutput = false;
+                        for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+                        {
+                            if (LinkedPin && LinkedPin->PinName.ToString().Contains(TEXT("if False")))
+                            {
+                                bPreferredOutput = true;
+                                break;
+                            }
+                        }
+
+                        if (!ParticlePositionOutputPin || bPreferredOutput)
+                        {
+                            ParticlePositionOutputPin = Pin;
+                        }
+                    }
+                    else if (Pin->Direction == EGPD_Output && Pin->PinName.ToString() == RotationCenterPinName)
+                    {
+                        for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+                        {
+                            if (LinkedPin && LinkedPin->Direction == EGPD_Input)
+                            {
+                                RotationCenterTargetPins.AddUnique(LinkedPin);
+                            }
+                        }
+                    }
+                }
+            }
+
+            int32 RewiredLinks = 0;
+            if (ParticlePositionOutputPin && RotationCenterTargetPins.Num() > 0)
+            {
+                if (UEdGraphNode* SourceNode = ParticlePositionOutputPin->GetOwningNode())
+                {
+                    SourceNode->Modify();
+                }
+
+                for (UEdGraphPin* TargetPin : RotationCenterTargetPins)
+                {
+                    if (!TargetPin)
+                    {
+                        continue;
+                    }
+
+                    if (UEdGraphNode* TargetNode = TargetPin->GetOwningNode())
+                    {
+                        TargetNode->Modify();
+                    }
+
+                    TArray<UEdGraphPin*> ExistingLinks = TargetPin->LinkedTo;
+                    for (UEdGraphPin* ExistingPin : ExistingLinks)
+                    {
+                        if (ExistingPin)
+                        {
+                            ExistingPin->BreakLinkTo(TargetPin);
+                        }
+                    }
+
+                    ParticlePositionOutputPin->MakeLinkTo(TargetPin);
+                    RewiredLinks++;
+                }
+            }
+
+            if (RewiredLinks > 0)
+            {
+                Graph->NotifyGraphChanged();
+                Script->InvalidateCompileResults(TEXT("TAAgent orbit uses particle position center"));
+                if (EmitterDataForOps)
+                {
+                    EmitterDataForOps->InvalidateCompileResults();
+                }
+
+                OpResult->SetBoolField(TEXT("success"), true);
+                OpResult->SetStringField(TEXT("action"), TEXT("orbit_use_particle_position_center"));
+                OpResult->SetNumberField(TEXT("rewired_links"), RewiredLinks);
+                SuccessCount++;
+            }
+            else
+            {
+                OpResult->SetBoolField(TEXT("success"), false);
+                OpResult->SetStringField(
+                    TEXT("error"),
+                    FString::Printf(
+                        TEXT("Could not rewire orbit center: particle=%s targets=%d"),
+                        ParticlePositionOutputPin ? TEXT("found") : TEXT("missing"),
+                        RotationCenterTargetPins.Num()));
+                FailCount++;
+            }
+        }
+        else if (Action == TEXT("compile_system"))
+        {
+            if (!NiagaraSystem)
+            {
+                Script->InvalidateCompileResults(TEXT("TAAgent standalone script compile"));
+                Script->RequestCompile(FGuid(), true);
+
+                OpResult->SetBoolField(TEXT("success"), true);
+                OpResult->SetStringField(TEXT("action"), TEXT("compile_system"));
+                OpResult->SetBoolField(TEXT("standalone_script"), true);
+                SuccessCount++;
+            }
+            else
+            {
+                NiagaraSystem->Modify();
+                Script->InvalidateCompileResults(TEXT("TAAgent force system compile"));
+
+                if (UNiagaraScript* SystemSpawnScript = NiagaraSystem->GetSystemSpawnScript())
+                {
+                    SystemSpawnScript->InvalidateCompileResults(TEXT("TAAgent force system compile"));
+                }
+                if (UNiagaraScript* SystemUpdateScript = NiagaraSystem->GetSystemUpdateScript())
+                {
+                    SystemUpdateScript->InvalidateCompileResults(TEXT("TAAgent force system compile"));
+                }
+
+                int32 InvalidatedEmitters = 0;
+                for (FNiagaraEmitterHandle& Handle : NiagaraSystem->GetEmitterHandles())
+                {
+                    if (FVersionedNiagaraEmitterData* HandleData = Handle.GetEmitterData())
+                    {
+                        HandleData->InvalidateCompileResults();
+                        InvalidatedEmitters++;
+                    }
+                }
+
+                const bool bLaunchedCompile = NiagaraSystem->RequestCompile(true);
+                NiagaraSystem->WaitForCompilationComplete(false, false);
+                const bool bHasActiveCompilations = NiagaraSystem->HasActiveCompilations();
+                NiagaraSystem->PollForCompilationComplete(false);
+                NiagaraSystem->CacheFromCompiledData();
+
+                OpResult->SetBoolField(TEXT("success"), true);
+                OpResult->SetStringField(TEXT("action"), TEXT("compile_system"));
+                OpResult->SetBoolField(TEXT("launched_compile"), bLaunchedCompile);
+                OpResult->SetBoolField(TEXT("has_active_compilations"), bHasActiveCompilations);
+                OpResult->SetNumberField(TEXT("invalidated_emitters"), InvalidatedEmitters);
+                SuccessCount++;
             }
         }
         else
