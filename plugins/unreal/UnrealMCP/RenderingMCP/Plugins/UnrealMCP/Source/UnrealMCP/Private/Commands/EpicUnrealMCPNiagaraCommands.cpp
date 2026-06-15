@@ -51,7 +51,9 @@
 #include "NiagaraNodeOutput.h"
 #include "NiagaraNodeFunctionCall.h"
 #include "NiagaraNodeOp.h"
+#include "NiagaraNodeParameterMapGet.h"
 #include "NiagaraNodeParameterMapSet.h"
+#include "NiagaraScriptVariable.h"
 #include "NiagaraNodeCustomHlsl.h"
 #include "NiagaraScriptSource.h"
 #include "EdGraph/EdGraphPin.h"
@@ -4297,6 +4299,256 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPNiagaraCommands::HandleUpdateNiagaraGraph(
                         TEXT("Could not find pins: orbit=%s particle=%s"),
                         *OrbitPositionPinName,
                         *ParticlePositionPinName));
+                FailCount++;
+            }
+        }
+        else if (Action == TEXT("orbit_center_from_source_particle_position"))
+        {
+            FString RotationCenterPinName = TEXT("Module.Rotation Center");
+            Op->TryGetStringField(TEXT("rotation_center_pin"), RotationCenterPinName);
+
+            FString SourcePositionPinName = TEXT("Particles.Position");
+            Op->TryGetStringField(TEXT("source_position_pin"), SourcePositionPinName);
+
+            Graph->Modify();
+            Script->Modify();
+
+            int32 PinsRenamed = 0;
+            for (UEdGraphNode* NodeBase : Graph->Nodes)
+            {
+                UNiagaraNodeParameterMapGet* GetNode = Cast<UNiagaraNodeParameterMapGet>(NodeBase);
+                if (!GetNode)
+                {
+                    continue;
+                }
+
+                for (UEdGraphPin* Pin : GetNode->Pins)
+                {
+                    if (!Pin || Pin->Direction != EGPD_Output || Pin->PinName.ToString() != RotationCenterPinName)
+                    {
+                        continue;
+                    }
+
+                    GetNode->Modify();
+                    Pin->PinName = FName(*SourcePositionPinName);
+                    Pin->PinFriendlyName = FText::FromString(SourcePositionPinName);
+                    PinsRenamed++;
+                }
+            }
+
+            if (PinsRenamed > 0)
+            {
+                Graph->NotifyGraphChanged();
+                Script->InvalidateCompileResults(TEXT("TAAgent orbit center from source particle position"));
+                if (EmitterDataForOps)
+                {
+                    EmitterDataForOps->InvalidateCompileResults();
+                }
+
+                OpResult->SetBoolField(TEXT("success"), true);
+                OpResult->SetStringField(TEXT("action"), TEXT("orbit_center_from_source_particle_position"));
+                OpResult->SetStringField(TEXT("rotation_center_pin"), RotationCenterPinName);
+                OpResult->SetStringField(TEXT("source_position_pin"), SourcePositionPinName);
+                OpResult->SetNumberField(TEXT("pins_renamed"), PinsRenamed);
+                SuccessCount++;
+            }
+            else
+            {
+                OpResult->SetBoolField(TEXT("success"), false);
+                OpResult->SetStringField(
+                    TEXT("error"),
+                    FString::Printf(TEXT("Could not find rotation center output pin: %s"), *RotationCenterPinName));
+                FailCount++;
+            }
+        }
+        else if (Action == TEXT("orbit_center_default_bind_source_particle_position"))
+        {
+            FString RotationCenterPinName = TEXT("Module.Rotation Center");
+            Op->TryGetStringField(TEXT("rotation_center_pin"), RotationCenterPinName);
+
+            FString SourcePositionPinName = TEXT("Particles.Position");
+            Op->TryGetStringField(TEXT("source_position_pin"), SourcePositionPinName);
+
+            Graph->Modify();
+            Script->Modify();
+
+            int32 PinsRestored = 0;
+            int32 BindingsSet = 0;
+
+            for (UEdGraphNode* NodeBase : Graph->Nodes)
+            {
+                UNiagaraNodeParameterMapGet* GetNode = Cast<UNiagaraNodeParameterMapGet>(NodeBase);
+                if (!GetNode)
+                {
+                    continue;
+                }
+
+                for (UEdGraphPin* Pin : GetNode->Pins)
+                {
+                    if (!Pin || Pin->Direction != EGPD_Output || Pin->PinName.ToString() != SourcePositionPinName)
+                    {
+                        continue;
+                    }
+
+                    bool bFeedsOrbitCenter = false;
+                    for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+                    {
+                        UNiagaraNodeOp* LinkedOp = LinkedPin ? Cast<UNiagaraNodeOp>(LinkedPin->GetOwningNode()) : nullptr;
+                        if (LinkedPin && LinkedPin->Direction == EGPD_Input && LinkedPin->PinName == FName(TEXT("B")) &&
+                            LinkedOp && LinkedOp->OpName == FName(TEXT("Numeric::Add")))
+                        {
+                            bFeedsOrbitCenter = true;
+                            break;
+                        }
+                    }
+
+                    if (!bFeedsOrbitCenter)
+                    {
+                        continue;
+                    }
+
+                    GetNode->Modify();
+                    Pin->PinName = FName(*RotationCenterPinName);
+                    Pin->PinFriendlyName = FText::FromString(RotationCenterPinName);
+                    PinsRestored++;
+                }
+            }
+
+            UNiagaraScriptVariable* ScriptVariable = Graph->GetScriptVariable(FName(*RotationCenterPinName));
+            if (ScriptVariable)
+            {
+                ScriptVariable->Modify();
+                ScriptVariable->DefaultMode = ENiagaraDefaultMode::Binding;
+                ScriptVariable->DefaultBinding.SetName(FName(*SourcePositionPinName));
+                ScriptVariable->UpdateChangeId();
+                BindingsSet++;
+            }
+
+            if (PinsRestored > 0 || BindingsSet > 0)
+            {
+                Graph->NotifyGraphChanged();
+                Script->InvalidateCompileResults(TEXT("TAAgent orbit center default bound to source particle position"));
+                if (EmitterDataForOps)
+                {
+                    EmitterDataForOps->InvalidateCompileResults();
+                }
+
+                OpResult->SetBoolField(TEXT("success"), true);
+                OpResult->SetStringField(TEXT("action"), TEXT("orbit_center_default_bind_source_particle_position"));
+                OpResult->SetStringField(TEXT("rotation_center_pin"), RotationCenterPinName);
+                OpResult->SetStringField(TEXT("source_position_pin"), SourcePositionPinName);
+                OpResult->SetNumberField(TEXT("pins_restored"), PinsRestored);
+                OpResult->SetNumberField(TEXT("bindings_set"), BindingsSet);
+                SuccessCount++;
+            }
+            else
+            {
+                OpResult->SetBoolField(TEXT("success"), false);
+                OpResult->SetStringField(TEXT("error"), TEXT("Could not restore orbit center pin or set default binding"));
+                FailCount++;
+            }
+        }
+        else if (Action == TEXT("orbit_center_default_value"))
+        {
+            FString RotationCenterPinName = TEXT("Module.Rotation Center");
+            Op->TryGetStringField(TEXT("rotation_center_pin"), RotationCenterPinName);
+
+            FString SourcePositionPinName = TEXT("Particles.Position");
+            Op->TryGetStringField(TEXT("source_position_pin"), SourcePositionPinName);
+
+            FVector3f DefaultValue(0.0f, 0.0f, 0.0f);
+            TSharedPtr<FJsonValue> ValueJson = Op->TryGetField(TEXT("value"));
+            const TArray<TSharedPtr<FJsonValue>>* ArrayValue = nullptr;
+            if (ValueJson.IsValid() && ValueJson->TryGetArray(ArrayValue) && ArrayValue && ArrayValue->Num() >= 3)
+            {
+                DefaultValue = FVector3f(
+                    static_cast<float>((*ArrayValue)[0]->AsNumber()),
+                    static_cast<float>((*ArrayValue)[1]->AsNumber()),
+                    static_cast<float>((*ArrayValue)[2]->AsNumber()));
+            }
+
+            Graph->Modify();
+            Script->Modify();
+
+            int32 PinsRestored = 0;
+            int32 DefaultsSet = 0;
+
+            for (UEdGraphNode* NodeBase : Graph->Nodes)
+            {
+                UNiagaraNodeParameterMapGet* GetNode = Cast<UNiagaraNodeParameterMapGet>(NodeBase);
+                if (!GetNode)
+                {
+                    continue;
+                }
+
+                for (UEdGraphPin* Pin : GetNode->Pins)
+                {
+                    if (!Pin || Pin->Direction != EGPD_Output || Pin->PinName.ToString() != SourcePositionPinName)
+                    {
+                        continue;
+                    }
+
+                    bool bFeedsOrbitCenter = false;
+                    for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+                    {
+                        UNiagaraNodeOp* LinkedOp = LinkedPin ? Cast<UNiagaraNodeOp>(LinkedPin->GetOwningNode()) : nullptr;
+                        if (LinkedPin && LinkedPin->Direction == EGPD_Input && LinkedPin->PinName == FName(TEXT("B")) &&
+                            LinkedOp && LinkedOp->OpName == FName(TEXT("Numeric::Add")))
+                        {
+                            bFeedsOrbitCenter = true;
+                            break;
+                        }
+                    }
+
+                    if (!bFeedsOrbitCenter)
+                    {
+                        continue;
+                    }
+
+                    GetNode->Modify();
+                    Pin->PinName = FName(*RotationCenterPinName);
+                    Pin->PinFriendlyName = FText::FromString(RotationCenterPinName);
+                    PinsRestored++;
+                }
+            }
+
+            UNiagaraScriptVariable* ScriptVariable = Graph->GetScriptVariable(FName(*RotationCenterPinName));
+            if (ScriptVariable)
+            {
+                ScriptVariable->Modify();
+                ScriptVariable->DefaultMode = ENiagaraDefaultMode::Value;
+
+                FNiagaraVariable DefaultVariable = ScriptVariable->Variable;
+                if (!DefaultVariable.GetType().IsValid())
+                {
+                    DefaultVariable = FNiagaraVariable(FNiagaraTypeDefinition::GetPositionDef(), FName(*RotationCenterPinName));
+                }
+                DefaultVariable.SetValue(DefaultValue);
+                ScriptVariable->SetDefaultValueData(DefaultVariable.GetData());
+                ScriptVariable->UpdateChangeId();
+                DefaultsSet++;
+            }
+
+            if (PinsRestored > 0 || DefaultsSet > 0)
+            {
+                Graph->NotifyGraphChanged();
+                Script->InvalidateCompileResults(TEXT("TAAgent orbit center restored to value default"));
+                if (EmitterDataForOps)
+                {
+                    EmitterDataForOps->InvalidateCompileResults();
+                }
+
+                OpResult->SetBoolField(TEXT("success"), true);
+                OpResult->SetStringField(TEXT("action"), TEXT("orbit_center_default_value"));
+                OpResult->SetStringField(TEXT("rotation_center_pin"), RotationCenterPinName);
+                OpResult->SetNumberField(TEXT("pins_restored"), PinsRestored);
+                OpResult->SetNumberField(TEXT("defaults_set"), DefaultsSet);
+                SuccessCount++;
+            }
+            else
+            {
+                OpResult->SetBoolField(TEXT("success"), false);
+                OpResult->SetStringField(TEXT("error"), TEXT("Could not restore orbit center value default"));
                 FailCount++;
             }
         }
