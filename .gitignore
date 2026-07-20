@@ -93,4 +93,5 @@ output/
 # TAAgent local runtime
 # ============================================
 .taagent-local/
+.codex_tmp/
 # End of TAAgent ignore rules
