@@ -23,6 +23,7 @@ get_assets(asset_class="NiagaraSystem")  # List any asset type
 | Generic Asset | 7 | create/delete/set/get/batch_create/batch_set/get_assets |
 | Generic Actor | 8 | spawn/delete/set/get/batch_spawn/batch_delete/batch_set/get_actors |
 | Blueprint Variable | 3 | create_blueprint_variable, delete_blueprint_variable, set_blueprint_variable_properties |
+| Blueprint Inspection | 3 | get_blueprint_info, read_blueprint_content, analyze_blueprint_graph |
 | Material | 3 | build_material_graph, compile_material, get_material_graph |
 | Import | 2 | import_texture, import_fbx |
 | Niagara | 4 | get_niagara_graph, update_niagara_graph, get_niagara_emitter, update_niagara_emitter |
@@ -132,6 +133,29 @@ set_blueprint_variable_properties(
         "expose_on_spawn": True,
     }
 )
+```
+
+---
+
+## Blueprint Inspection Tools (3 tools)
+
+| Tool | Purpose |
+|------|---------|
+| `get_blueprint_info(blueprint_path, ...)` | Read variables, functions, graphs, and widget metadata |
+| `read_blueprint_content(blueprint_path, ...)` | Read Blueprint structure and basic Event Graph nodes |
+| `analyze_blueprint_graph(blueprint_path, graph_name="EventGraph", ...)` | Read graph nodes, pins, positions, and connections |
+
+All three tools accept standalone Blueprint asset paths. They also accept embedded
+Level Sequence Director Blueprint object paths using the `Outer:Subobject` form:
+
+```python
+director_bp = (
+    "/Game/Gameplay/Sequence/Story/Prologue/StageBegin_Prolugue_Main."
+    "StageBegin_Prolugue_Main:StageBegin_Prolugue_Main_DirectorBP"
+)
+
+read_blueprint_content(director_bp)
+analyze_blueprint_graph(director_bp, graph_name="EventGraph")
 ```
 
 ---

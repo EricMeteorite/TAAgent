@@ -345,6 +345,70 @@ TSharedPtr<FJsonObject> FNodePropertyManager::DispatchEditAction(
 		}
 	}
 
+	// === ANY K2 NODE: Set an input pin's literal or object default ===
+	if (Action.Equals(TEXT("set_pin_default"), ESearchCase::IgnoreCase))
+	{
+		FString PinName;
+		if (!Params->TryGetStringField(TEXT("pin_name"), PinName))
+		{
+			return CreateErrorResponse(TEXT("Missing 'pin_name' parameter"));
+		}
+
+		UEdGraphPin* Pin = Node->FindPin(FName(*PinName), EGPD_Input);
+		if (!Pin)
+		{
+			return CreateErrorResponse(FString::Printf(TEXT("Input pin not found: %s"), *PinName));
+		}
+
+		const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
+		bool bSuccess = false;
+		FString AppliedValue;
+		FString ObjectPath;
+		if (Params->TryGetStringField(TEXT("object_path"), ObjectPath) && !ObjectPath.IsEmpty())
+		{
+			UObject* DefaultObject = StaticLoadObject(UObject::StaticClass(), nullptr, *ObjectPath);
+			if (!DefaultObject)
+			{
+				return CreateErrorResponse(FString::Printf(TEXT("Default object not found: %s"), *ObjectPath));
+			}
+			Schema->TrySetDefaultObject(*Pin, DefaultObject);
+			bSuccess = Pin->DefaultObject == DefaultObject;
+			AppliedValue = DefaultObject->GetPathName();
+		}
+		else
+		{
+			FString PinValue;
+			if (!Params->TryGetStringField(TEXT("pin_value"), PinValue))
+			{
+				return CreateErrorResponse(TEXT("Missing 'pin_value' or 'object_path' parameter"));
+			}
+			Schema->TrySetDefaultValue(*Pin, PinValue);
+			bSuccess = Pin->DefaultValue == PinValue;
+			AppliedValue = PinValue;
+		}
+
+		if (!bSuccess)
+		{
+			return CreateErrorResponse(FString::Printf(TEXT("Failed to set default for pin: %s"), *PinName));
+		}
+
+		Node->PinDefaultValueChanged(Pin);
+		Graph->NotifyGraphChanged();
+		if (UBlueprint* Blueprint = FBlueprintEditorUtils::FindBlueprintForGraph(Graph))
+		{
+			Blueprint->MarkPackageDirty();
+			FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+			FKismetEditorUtilities::CompileBlueprint(Blueprint);
+		}
+
+		TSharedPtr<FJsonObject> Response = MakeShareable(new FJsonObject);
+		Response->SetBoolField(TEXT("success"), true);
+		Response->SetStringField(TEXT("action"), TEXT("set_pin_default"));
+		Response->SetStringField(TEXT("pin_name"), PinName);
+		Response->SetStringField(TEXT("applied_value"), AppliedValue);
+		return Response;
+	}
+
 	// Unknown action
 	return CreateErrorResponse(FString::Printf(TEXT("Unknown action: %s"), *Action));
 }

@@ -26,6 +26,9 @@ private:
     // Connect nodes in Blueprint graph
     TSharedPtr<FJsonObject> HandleConnectNodes(const TSharedPtr<FJsonObject>& Params);
 
+    // Disconnect nodes in Blueprint graph
+    TSharedPtr<FJsonObject> HandleDisconnectNodes(const TSharedPtr<FJsonObject>& Params);
+
     // Create variable in Blueprint
     TSharedPtr<FJsonObject> HandleCreateVariable(const TSharedPtr<FJsonObject>& Params);
 

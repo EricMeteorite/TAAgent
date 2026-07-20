@@ -27,6 +27,10 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintGraphCommands::HandleCommand(cons
     {
         return HandleConnectNodes(Params);
     }
+    else if (CommandType == TEXT("disconnect_nodes"))
+    {
+        return HandleDisconnectNodes(Params);
+    }
     else if (CommandType == TEXT("create_variable"))
     {
         return HandleCreateVariable(Params);
@@ -134,6 +138,11 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintGraphCommands::HandleConnectNodes
 
     // Use the BPConnector to connect the nodes
     return FBPConnector::ConnectNodes(Params);
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintGraphCommands::HandleDisconnectNodes(const TSharedPtr<FJsonObject>& Params)
+{
+    return FBPConnector::DisconnectNodes(Params);
 }
 
 TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintGraphCommands::HandleCreateVariable(const TSharedPtr<FJsonObject>& Params)

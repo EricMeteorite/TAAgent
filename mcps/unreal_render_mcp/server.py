@@ -71,9 +71,11 @@ from tools import (
     save_current_level,
     get_current_level,
     # Blueprint
+    analyze_blueprint_graph,
     create_blueprint_variable,
     delete_blueprint_variable,
     get_blueprint_info,
+    read_blueprint_content,
     set_blueprint_variable_properties,
     update_blueprint,
 )
@@ -213,6 +215,8 @@ mcp.tool()(get_current_level)
 mcp.tool()(create_blueprint_variable)
 mcp.tool()(delete_blueprint_variable)
 mcp.tool()(get_blueprint_info)
+mcp.tool()(read_blueprint_content)
+mcp.tool()(analyze_blueprint_graph)
 mcp.tool()(set_blueprint_variable_properties)
 mcp.tool()(update_blueprint)
 

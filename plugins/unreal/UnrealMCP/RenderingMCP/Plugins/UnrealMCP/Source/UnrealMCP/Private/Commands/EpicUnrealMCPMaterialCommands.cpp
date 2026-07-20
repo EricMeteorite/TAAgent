@@ -105,7 +105,7 @@ FString NormalizeMaterialAssetPath(const FString& AssetPath)
     return AssetPath.StartsWith(TEXT("/")) ? AssetPath : FString::Printf(TEXT("/Game/Materials/%s"), *AssetPath);
 }
 
-FString MaterialDomainToString(EMaterialDomain Domain)
+FString MaterialAssetDomainToString(EMaterialDomain Domain)
 {
     switch (Domain)
     {
@@ -128,7 +128,7 @@ FString MaterialDomainToString(EMaterialDomain Domain)
     }
 }
 
-FString BlendableLocationToString(EBlendableLocation Location)
+FString MaterialBlendableLocationToString(EBlendableLocation Location)
 {
     switch (Location)
     {
@@ -988,8 +988,8 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPMaterialCommands::HandleGetMaterialInstanc
     if (UMaterial* BaseMaterial = MaterialInstance->GetMaterial())
     {
         ResultObj->SetStringField(TEXT("base_material_path"), BaseMaterial->GetPathName());
-        ResultObj->SetStringField(TEXT("material_domain"), MaterialDomainToString(BaseMaterial->MaterialDomain));
-        ResultObj->SetStringField(TEXT("blendable_location"), BlendableLocationToString(BaseMaterial->BlendableLocation));
+        ResultObj->SetStringField(TEXT("material_domain"), MaterialAssetDomainToString(BaseMaterial->MaterialDomain));
+        ResultObj->SetStringField(TEXT("blendable_location"), MaterialBlendableLocationToString(BaseMaterial->BlendableLocation));
     }
 
     TArray<TSharedPtr<FJsonValue>> ScalarParameters;
@@ -1048,8 +1048,8 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPMaterialCommands::HandleGetMaterialAnalysi
     ResultObj->SetStringField(TEXT("requested_asset_class"), AssetObject->GetClass()->GetName());
     ResultObj->SetStringField(TEXT("analysis_asset_path"), BaseMaterial->GetPathName());
     ResultObj->SetStringField(TEXT("analysis_asset_name"), BaseMaterial->GetName());
-    ResultObj->SetStringField(TEXT("material_domain"), MaterialDomainToString(BaseMaterial->MaterialDomain));
-    ResultObj->SetStringField(TEXT("blendable_location"), BlendableLocationToString(BaseMaterial->BlendableLocation));
+    ResultObj->SetStringField(TEXT("material_domain"), MaterialAssetDomainToString(BaseMaterial->MaterialDomain));
+    ResultObj->SetStringField(TEXT("blendable_location"), MaterialBlendableLocationToString(BaseMaterial->BlendableLocation));
     ResultObj->SetNumberField(TEXT("blend_mode"), BaseMaterial->BlendMode);
     ResultObj->SetObjectField(TEXT("summary"), BuildMaterialAnalysisSummary(BaseMaterial));
     return ResultObj;

@@ -301,6 +301,7 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
             // Blueprint Graph Commands
             else if (CommandType == TEXT("add_blueprint_node") ||
                      CommandType == TEXT("connect_nodes") ||
+                     CommandType == TEXT("disconnect_nodes") ||
                      CommandType == TEXT("create_variable") ||
                      CommandType == TEXT("delete_variable") ||
                      CommandType == TEXT("set_blueprint_variable_properties") ||

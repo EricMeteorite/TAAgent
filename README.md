@@ -93,7 +93,7 @@ UE 资产与场景操作工具。
 |------|------|
 | **通用资产** | `create_asset`, `delete_asset`, `get_assets`, `set_asset_properties`, `batch_*` |
 | **通用 Actor** | `spawn_actor`, `delete_actor`, `get_actors`, `set_actor_properties`, `batch_*` |
-| **Blueprint 变量** | `create_blueprint_variable`, `delete_blueprint_variable`, `set_blueprint_variable_properties(properties={...})` |
+| **Blueprint** | `get_blueprint_info`, `read_blueprint_content`, `analyze_blueprint_graph`, `create_blueprint_variable`, `delete_blueprint_variable`, `set_blueprint_variable_properties(properties={...})`；支持 Level Sequence 内嵌 Director Blueprint 路径 |
 | **材质图** | `build_material_graph`, `get_material_graph` |
 | **纹理** | `import_texture` |
 | **网格** | `import_fbx` |

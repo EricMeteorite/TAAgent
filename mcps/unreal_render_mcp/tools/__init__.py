@@ -83,9 +83,11 @@ from optimization import (
 )
 
 from blueprint import (
+    analyze_blueprint_graph,
     create_blueprint_variable,
     delete_blueprint_variable,
     get_blueprint_info,
+    read_blueprint_content,
     set_blueprint_variable_properties,
     update_blueprint,
 )
@@ -148,9 +150,11 @@ __all__ = [
     # Optimization
     "analyze_current_level_post_process",
     # Blueprint
+    "analyze_blueprint_graph",
     "create_blueprint_variable",
     "delete_blueprint_variable",
     "get_blueprint_info",
+    "read_blueprint_content",
     "set_blueprint_variable_properties",
     "update_blueprint",
 ]

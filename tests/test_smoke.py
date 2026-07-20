@@ -51,6 +51,52 @@ def test_niagara_tools_export_bake_command() -> None:
     assert hasattr(module, "bake_niagara_system")
 
 
+def test_blueprint_tools_export_content_and_graph_analysis() -> None:
+    module = importlib.import_module("mcps.unreal_render_mcp.tools.blueprint")
+    assert hasattr(module, "read_blueprint_content")
+    assert hasattr(module, "analyze_blueprint_graph")
+
+
+def test_blueprint_inspection_tools_forward_nested_paths(monkeypatch) -> None:
+    module = importlib.import_module("mcps.unreal_render_mcp.tools.blueprint")
+    calls = []
+    monkeypatch.setattr(
+        module,
+        "send_command",
+        lambda command, params: calls.append((command, params)) or {"status": "success"},
+    )
+    path = "/Game/Cinematics/Intro.Intro:Intro_DirectorBP"
+
+    module.read_blueprint_content(path, include_components=False)
+    module.analyze_blueprint_graph(path, graph_name="EventGraph")
+
+    assert calls[0][0] == "read_blueprint_content"
+    assert calls[0][1]["blueprint_path"] == path
+    assert calls[0][1]["include_components"] is False
+    assert calls[1][0] == "analyze_blueprint_graph"
+    assert calls[1][1]["blueprint_path"] == path
+    assert calls[1][1]["graph_name"] == "EventGraph"
+
+
+def test_blueprint_resolver_supports_nested_subobjects() -> None:
+    source = (
+        REPO_ROOT
+        / "plugins"
+        / "unreal"
+        / "UnrealMCP"
+        / "RenderingMCP"
+        / "Plugins"
+        / "UnrealMCP"
+        / "Source"
+        / "UnrealMCP"
+        / "Private"
+        / "Commands"
+        / "EpicUnrealMCPCommonUtils.cpp"
+    ).read_text(encoding="utf-8")
+    assert 'ObjectPath.Split(TEXT(":"' in source
+    assert "FindObject<UBlueprint>(OuterObject" in source
+
+
 def test_asset_validation_plugin_exists() -> None:
     asset_validation_uplugin = (
         REPO_ROOT

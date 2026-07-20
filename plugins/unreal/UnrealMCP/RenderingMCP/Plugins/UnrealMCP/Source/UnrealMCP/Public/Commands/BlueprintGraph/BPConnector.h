@@ -23,6 +23,12 @@ public:
      */
     static TSharedPtr<FJsonObject> ConnectNodes(const TSharedPtr<FJsonObject>& Params);
 
+    /**
+     * Disconnects two Blueprint pins that are currently linked.
+     * Uses the same parameters as ConnectNodes.
+     */
+    static TSharedPtr<FJsonObject> DisconnectNodes(const TSharedPtr<FJsonObject>& Params);
+
 private:
     /**
      * Finds a node by its ID in the graph

@@ -25,6 +25,7 @@
 #include "BlueprintActionDatabase.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "Misc/PackageName.h"
 #include "UObject/SoftObjectPath.h"
 #include "UObject/UnrealType.h"
 
@@ -555,24 +556,55 @@ UBlueprint* FEpicUnrealMCPCommonUtils::FindBlueprint(const FString& BlueprintNam
 
 UBlueprint* FEpicUnrealMCPCommonUtils::FindBlueprintByName(const FString& BlueprintName)
 {
-    // The correct object path for a Blueprint asset is /Game/Path/AssetName.AssetName
-    FString ObjectPath;
-
-    // Check if BlueprintName is already a full path (starts with /)
-    if (BlueprintName.StartsWith(TEXT("/")))
+    FString ObjectPath = FPackageName::ExportTextPathToObjectPath(BlueprintName.TrimStartAndEnd());
+    if (!ObjectPath.StartsWith(TEXT("/")))
     {
-        // It's already a full path, use it directly with the class suffix
-        FString AssetName = FPaths::GetBaseFilename(BlueprintName);
-        ObjectPath = FString::Printf(TEXT("%s.%s"), *BlueprintName, *AssetName);
+        ObjectPath = FString::Printf(TEXT("/Game/Blueprints/%s.%s"), *ObjectPath, *ObjectPath);
     }
-    else
+    else if (!ObjectPath.Contains(TEXT(".")) && !ObjectPath.Contains(TEXT(":")))
     {
-        // It's just a name, add the default /Game/Blueprints/ prefix
-        ObjectPath = FString::Printf(TEXT("/Game/Blueprints/%s.%s"), *BlueprintName, *BlueprintName);
+        ObjectPath += TEXT(".") + FPaths::GetBaseFilename(ObjectPath);
     }
 
-    // First, try to load the object directly, as it's the fastest method.
-    UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *ObjectPath);
+    // In-memory subobjects (notably Level Sequence Director Blueprints) are not
+    // assets in the Asset Registry, so look for the exact object path first.
+    UBlueprint* Blueprint = FindObject<UBlueprint>(nullptr, *ObjectPath);
+    if (Blueprint)
+    {
+        return Blueprint;
+    }
+
+    // A Director Blueprint is stored as a subobject of its Level Sequence:
+    // /Game/Path/Sequence.Sequence:Sequence_DirectorBP. Load the outer asset,
+    // then resolve the Blueprint relative to it.
+    FString OuterObjectPath;
+    FString SubobjectPath;
+    if (ObjectPath.Split(TEXT(":"), &OuterObjectPath, &SubobjectPath, ESearchCase::CaseSensitive, ESearchDir::FromEnd))
+    {
+        UObject* OuterObject = StaticLoadObject(UObject::StaticClass(), nullptr, *OuterObjectPath);
+        if (!OuterObject)
+        {
+            OuterObject = UEditorAssetLibrary::LoadAsset(OuterObjectPath);
+        }
+
+        if (OuterObject)
+        {
+            Blueprint = FindObject<UBlueprint>(OuterObject, *SubobjectPath);
+            if (!Blueprint)
+            {
+                // Loading the outer may have created the subobject after the
+                // initial exact-path lookup.
+                Blueprint = FindObject<UBlueprint>(nullptr, *ObjectPath);
+            }
+            if (Blueprint)
+            {
+                return Blueprint;
+            }
+        }
+    }
+
+    // Standard standalone Blueprint asset.
+    Blueprint = LoadObject<UBlueprint>(nullptr, *ObjectPath);
     if (Blueprint)
     {
         return Blueprint;
@@ -594,8 +626,7 @@ UBlueprint* FEpicUnrealMCPCommonUtils::FindBlueprintByName(const FString& Bluepr
 
     // Fallback for cases where the asset is in memory but not yet fully saved,
     // where it might be found via its package path.
-    FString PackagePath = TEXT("/Game/Blueprints/") + BlueprintName;
-    Blueprint = FindObject<UBlueprint>(nullptr, *PackagePath);
+    Blueprint = FindObject<UBlueprint>(nullptr, *ObjectPath);
 
     if (!Blueprint)
     {

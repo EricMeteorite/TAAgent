@@ -5,6 +5,7 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_K2.h"
+#include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "EditorAssetLibrary.h"
 
@@ -219,4 +220,102 @@ bool FBPConnector::ArePinsCompatible(UEdGraphPin* SourcePin, UEdGraphPin* Target
     }
 
     return SourcePin->PinType.PinCategory == TargetPin->PinType.PinCategory;
+}
+
+TSharedPtr<FJsonObject> FBPConnector::DisconnectNodes(const TSharedPtr<FJsonObject>& Params)
+{
+    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+
+    FString BlueprintName;
+    FString SourceNodeId;
+    FString SourcePinName;
+    FString TargetNodeId;
+    FString TargetPinName;
+    if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName) ||
+        !Params->TryGetStringField(TEXT("source_node_id"), SourceNodeId) ||
+        !Params->TryGetStringField(TEXT("source_pin_name"), SourcePinName) ||
+        !Params->TryGetStringField(TEXT("target_node_id"), TargetNodeId) ||
+        !Params->TryGetStringField(TEXT("target_pin_name"), TargetPinName))
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("Missing Blueprint connection parameter"));
+        return Result;
+    }
+
+    FString BlueprintPath = BlueprintName;
+    if (!BlueprintPath.StartsWith(TEXT("/")))
+    {
+        BlueprintPath = TEXT("/Game/Blueprints/") + BlueprintPath;
+    }
+    if (!BlueprintPath.Contains(TEXT(".")))
+    {
+        BlueprintPath += TEXT(".") + FPaths::GetBaseFilename(BlueprintPath);
+    }
+
+    UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *BlueprintPath);
+    if (!Blueprint && UEditorAssetLibrary::DoesAssetExist(BlueprintPath))
+    {
+        Blueprint = Cast<UBlueprint>(UEditorAssetLibrary::LoadAsset(BlueprintPath));
+    }
+    if (!Blueprint)
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("Blueprint not found"));
+        return Result;
+    }
+
+    FString FunctionName;
+    Params->TryGetStringField(TEXT("function_name"), FunctionName);
+    UEdGraph* Graph = nullptr;
+    if (FunctionName.IsEmpty())
+    {
+        Graph = Blueprint->UbergraphPages.Num() > 0 ? Blueprint->UbergraphPages[0] : nullptr;
+    }
+    else
+    {
+        for (UEdGraph* FunctionGraph : Blueprint->FunctionGraphs)
+        {
+            if (FunctionGraph && FunctionGraph->GetFName().ToString().Equals(FunctionName, ESearchCase::IgnoreCase))
+            {
+                Graph = FunctionGraph;
+                break;
+            }
+        }
+    }
+    if (!Graph)
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("Blueprint graph not found"));
+        return Result;
+    }
+
+    UK2Node* SourceNode = FindNodeById(Graph, SourceNodeId);
+    UK2Node* TargetNode = FindNodeById(Graph, TargetNodeId);
+    UEdGraphPin* SourcePin = SourceNode ? FindPinByName(SourceNode, SourcePinName, EGPD_Output) : nullptr;
+    UEdGraphPin* TargetPin = TargetNode ? FindPinByName(TargetNode, TargetPinName, EGPD_Input) : nullptr;
+    if (!SourcePin || !TargetPin)
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("Node or pin not found"));
+        return Result;
+    }
+    if (!SourcePin->LinkedTo.Contains(TargetPin))
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), TEXT("Pins are not connected"));
+        return Result;
+    }
+
+    SourcePin->BreakLinkTo(TargetPin);
+    Graph->NotifyGraphChanged();
+    Blueprint->MarkPackageDirty();
+    FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+    FKismetEditorUtilities::CompileBlueprint(Blueprint);
+
+    Result->SetBoolField(TEXT("success"), true);
+    Result->SetStringField(TEXT("source_node"), SourceNodeId);
+    Result->SetStringField(TEXT("source_pin"), SourcePinName);
+    Result->SetStringField(TEXT("target_node"), TargetNodeId);
+    Result->SetStringField(TEXT("target_pin"), TargetPinName);
+    return Result;
 }

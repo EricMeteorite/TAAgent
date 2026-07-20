@@ -139,6 +139,60 @@ def get_blueprint_info(
 
 
 @with_unreal_connection
+def read_blueprint_content(
+    blueprint_path: str,
+    include_event_graph: bool = True,
+    include_functions: bool = True,
+    include_variables: bool = True,
+    include_components: bool = True,
+    include_interfaces: bool = True,
+) -> Dict[str, Any]:
+    """Read a Blueprint's high-level structure and Event Graph nodes.
+
+    ``blueprint_path`` may identify either a standalone Blueprint asset or an
+    embedded object such as a Level Sequence Director Blueprint::
+
+        /Game/Cinematics/Intro.Intro:Intro_DirectorBP
+    """
+    return send_command(
+        "read_blueprint_content",
+        {
+            "blueprint_path": blueprint_path,
+            "include_event_graph": include_event_graph,
+            "include_functions": include_functions,
+            "include_variables": include_variables,
+            "include_components": include_components,
+            "include_interfaces": include_interfaces,
+        },
+    )
+
+
+@with_unreal_connection
+def analyze_blueprint_graph(
+    blueprint_path: str,
+    graph_name: str = "EventGraph",
+    include_node_details: bool = True,
+    include_pin_connections: bool = True,
+    trace_execution_flow: bool = True,
+) -> Dict[str, Any]:
+    """Read Blueprint graph nodes, pins, positions, and connections.
+
+    Supports standalone Blueprint assets and embedded Level Sequence Director
+    Blueprints using their full ``Outer:Subobject`` object path.
+    """
+    return send_command(
+        "analyze_blueprint_graph",
+        {
+            "blueprint_path": blueprint_path,
+            "graph_name": graph_name,
+            "include_node_details": include_node_details,
+            "include_pin_connections": include_pin_connections,
+            "trace_execution_flow": trace_execution_flow,
+        },
+    )
+
+
+@with_unreal_connection
 def update_blueprint(
     blueprint_path: str,
     properties: dict = None,
