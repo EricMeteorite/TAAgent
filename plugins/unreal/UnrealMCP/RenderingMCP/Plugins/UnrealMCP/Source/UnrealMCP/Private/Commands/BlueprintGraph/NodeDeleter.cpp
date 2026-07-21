@@ -29,6 +29,7 @@ TSharedPtr<FJsonObject> FNodeDeleter::DeleteNode(const TSharedPtr<FJsonObject>& 
 	// Get optional function name
 	FString FunctionName;
 	Params->TryGetStringField(TEXT("function_name"), FunctionName);
+	Params->TryGetStringField(TEXT("graph_name"), FunctionName);
 
 	// Load the Blueprint
 	UBlueprint* Blueprint = LoadBlueprint(BlueprintName);
@@ -91,6 +92,14 @@ UEdGraph* FNodeDeleter::GetGraph(UBlueprint* Blueprint, const FString& FunctionN
 			return Blueprint->UbergraphPages[0];
 		}
 		return nullptr;
+	}
+
+	for (UEdGraph* UberGraph : Blueprint->UbergraphPages)
+	{
+		if (UberGraph && UberGraph->GetName().Equals(FunctionName, ESearchCase::IgnoreCase))
+		{
+			return UberGraph;
+		}
 	}
 
 	// Search in function graphs

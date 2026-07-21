@@ -22,6 +22,7 @@
 #include "K2Node_CastByteToEnum.h"
 #include "K2Node_Event.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/KismetEditorUtilities.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "EditorAssetLibrary.h"
 #include "Json.h"
@@ -85,6 +86,7 @@ TSharedPtr<FJsonObject> FNodePropertyManager::SetNodeProperty(const TSharedPtr<F
 	// Get optional function name
 	FString FunctionName;
 	Params->TryGetStringField(TEXT("function_name"), FunctionName);
+	Params->TryGetStringField(TEXT("graph_name"), FunctionName);
 
 	// Load the Blueprint
 	UBlueprint* Blueprint = LoadBlueprint(BlueprintName);
@@ -188,6 +190,7 @@ TSharedPtr<FJsonObject> FNodePropertyManager::EditNode(const TSharedPtr<FJsonObj
 	// Get optional function name
 	FString FunctionName;
 	Params->TryGetStringField(TEXT("function_name"), FunctionName);
+	Params->TryGetStringField(TEXT("graph_name"), FunctionName);
 
 	// Load the Blueprint
 	UBlueprint* Blueprint = LoadBlueprint(BlueprintName);
@@ -554,6 +557,14 @@ UEdGraph* FNodePropertyManager::GetGraph(UBlueprint* Blueprint, const FString& F
 			return Blueprint->UbergraphPages[0];
 		}
 		return nullptr;
+	}
+
+	for (UEdGraph* UberGraph : Blueprint->UbergraphPages)
+	{
+		if (UberGraph && UberGraph->GetName().Equals(FunctionName, ESearchCase::IgnoreCase))
+		{
+			return UberGraph;
+		}
 	}
 
 	// Search in function graphs

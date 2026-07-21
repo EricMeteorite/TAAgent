@@ -39,7 +39,9 @@ TSharedPtr<FJsonObject> FBPVariables::CreateVariable(const TSharedPtr<FJsonObjec
         FBPVariableDescription& Variable = Blueprint->NewVariables.Last();
         Variable.FriendlyName = VariableName;
         Variable.Category = FText::FromString(Category);
-        Variable.PropertyFlags = CPF_BlueprintVisible | CPF_BlueprintReadOnly;
+        // Member variables created for Blueprint graphs must be writable by
+        // default; otherwise any generated Set node fails during cook.
+        Variable.PropertyFlags = CPF_BlueprintVisible;
         if (IsPublic)
         {
             Variable.PropertyFlags |= CPF_Edit;

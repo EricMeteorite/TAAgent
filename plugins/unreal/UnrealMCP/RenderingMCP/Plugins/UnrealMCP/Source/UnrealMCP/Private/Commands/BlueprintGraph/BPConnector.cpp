@@ -9,6 +9,47 @@
 #include "Kismet2/KismetEditorUtilities.h"
 #include "EditorAssetLibrary.h"
 
+namespace
+{
+UEdGraph* ResolveBlueprintGraph(UBlueprint* Blueprint, const FString& FunctionName, const FString& GraphName)
+{
+    if (!Blueprint)
+    {
+        return nullptr;
+    }
+    if (!GraphName.IsEmpty())
+    {
+        for (UEdGraph* Graph : Blueprint->UbergraphPages)
+        {
+            if (Graph && Graph->GetFName().ToString().Equals(GraphName, ESearchCase::IgnoreCase))
+            {
+                return Graph;
+            }
+        }
+        for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+        {
+            if (Graph && Graph->GetFName().ToString().Equals(GraphName, ESearchCase::IgnoreCase))
+            {
+                return Graph;
+            }
+        }
+        return nullptr;
+    }
+    if (!FunctionName.IsEmpty())
+    {
+        for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+        {
+            if (Graph && Graph->GetFName().ToString().Contains(FunctionName))
+            {
+                return Graph;
+            }
+        }
+        return nullptr;
+    }
+    return Blueprint->UbergraphPages.Num() > 0 ? Blueprint->UbergraphPages[0] : nullptr;
+}
+}
+
 TSharedPtr<FJsonObject> FBPConnector::ConnectNodes(const TSharedPtr<FJsonObject>& Params)
 {
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
@@ -21,7 +62,9 @@ TSharedPtr<FJsonObject> FBPConnector::ConnectNodes(const TSharedPtr<FJsonObject>
     FString TargetPinName = Params->GetStringField(TEXT("target_pin_name"));
 
     FString FunctionName;
+    FString GraphName;
     Params->TryGetStringField(TEXT("function_name"), FunctionName);
+    Params->TryGetStringField(TEXT("graph_name"), GraphName);
 
     // Charger Blueprint - handle both full paths and simple names
     UBlueprint* Blueprint = nullptr;
@@ -63,7 +106,11 @@ TSharedPtr<FJsonObject> FBPConnector::ConnectNodes(const TSharedPtr<FJsonObject>
     // Get graph
     UEdGraph* Graph = nullptr;
 
-    if (!FunctionName.IsEmpty())
+    if (!GraphName.IsEmpty())
+    {
+        Graph = ResolveBlueprintGraph(Blueprint, FString(), GraphName);
+    }
+    else if (!FunctionName.IsEmpty())
     {
         // Strategy 1: Try exact name match with GetFName()
         for (UEdGraph* FuncGraph : Blueprint->FunctionGraphs)
@@ -265,9 +312,15 @@ TSharedPtr<FJsonObject> FBPConnector::DisconnectNodes(const TSharedPtr<FJsonObje
     }
 
     FString FunctionName;
+    FString GraphName;
     Params->TryGetStringField(TEXT("function_name"), FunctionName);
+    Params->TryGetStringField(TEXT("graph_name"), GraphName);
     UEdGraph* Graph = nullptr;
-    if (FunctionName.IsEmpty())
+    if (!GraphName.IsEmpty())
+    {
+        Graph = ResolveBlueprintGraph(Blueprint, FString(), GraphName);
+    }
+    else if (FunctionName.IsEmpty())
     {
         Graph = Blueprint->UbergraphPages.Num() > 0 ? Blueprint->UbergraphPages[0] : nullptr;
     }

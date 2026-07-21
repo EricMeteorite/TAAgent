@@ -9,6 +9,7 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraphSchema_K2.h"
 #include "K2Node_CallFunction.h"
+#include "K2Node_CustomEvent.h"
 #include "K2Node_Event.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
@@ -63,9 +64,36 @@ TSharedPtr<FJsonObject> FBlueprintNodeManager::AddNode(const TSharedPtr<FJsonObj
 
 	// Get the target graph (function graph or event graph)
 	FString FunctionName;
+	FString GraphName;
 	UEdGraph* Graph = nullptr;
 
-	if (NodeParams->TryGetStringField(TEXT("function_name"), FunctionName) && !FunctionName.IsEmpty())
+	if (NodeParams->TryGetStringField(TEXT("graph_name"), GraphName) && !GraphName.IsEmpty())
+	{
+		for (UEdGraph* UberGraph : BP->UbergraphPages)
+		{
+			if (UberGraph && UberGraph->GetFName().ToString().Equals(GraphName, ESearchCase::IgnoreCase))
+			{
+				Graph = UberGraph;
+				break;
+			}
+		}
+		if (!Graph)
+		{
+			for (UEdGraph* FuncGraph : BP->FunctionGraphs)
+			{
+				if (FuncGraph && FuncGraph->GetFName().ToString().Equals(GraphName, ESearchCase::IgnoreCase))
+				{
+					Graph = FuncGraph;
+					break;
+				}
+			}
+		}
+		if (!Graph)
+		{
+			return CreateErrorResponse(FString::Printf(TEXT("Graph not found: %s"), *GraphName));
+		}
+	}
+	else if (NodeParams->TryGetStringField(TEXT("function_name"), FunctionName) && !FunctionName.IsEmpty())
 	{
 		// Try to find the function graph
 		for (UEdGraph* FuncGraph : BP->FunctionGraphs)
@@ -212,6 +240,28 @@ TSharedPtr<FJsonObject> FBlueprintNodeManager::AddNode(const TSharedPtr<FJsonObj
 	else if (NodeType.Equals(TEXT("Event"), ESearchCase::IgnoreCase))
 	{
 		NewNode = CreateEventNode(Graph, NodeParams);
+	}
+	else if (NodeType.Equals(TEXT("CustomEvent"), ESearchCase::IgnoreCase))
+	{
+		FString EventName;
+		if (!NodeParams->TryGetStringField(TEXT("event_name"), EventName) || EventName.IsEmpty())
+		{
+			return CreateErrorResponse(TEXT("Missing 'event_name' for CustomEvent node"));
+		}
+
+		UK2Node_CustomEvent* EventNode = NewObject<UK2Node_CustomEvent>(Graph);
+		EventNode->CustomFunctionName = FName(*EventName);
+		double PosX = 0.0;
+		double PosY = 0.0;
+		NodeParams->TryGetNumberField(TEXT("pos_x"), PosX);
+		NodeParams->TryGetNumberField(TEXT("pos_y"), PosY);
+		EventNode->NodePosX = static_cast<int32>(PosX);
+		EventNode->NodePosY = static_cast<int32>(PosY);
+		Graph->AddNode(EventNode, true, false);
+		EventNode->CreateNewGuid();
+		EventNode->PostPlacedNewNode();
+		EventNode->AllocateDefaultPins();
+		NewNode = EventNode;
 	}
 	else
 	{
