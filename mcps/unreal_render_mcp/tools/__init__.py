@@ -82,6 +82,12 @@ from optimization import (
     analyze_current_level_post_process,
 )
 
+from insights import (
+    export_unreal_insights_timing_events,
+    get_unreal_insights_timing_summary,
+    list_unreal_insights_traces,
+)
+
 from blueprint import (
     analyze_blueprint_graph,
     create_blueprint_variable,
@@ -149,6 +155,10 @@ __all__ = [
     "get_current_level",
     # Optimization
     "analyze_current_level_post_process",
+    # Unreal Insights
+    "list_unreal_insights_traces",
+    "get_unreal_insights_timing_summary",
+    "export_unreal_insights_timing_events",
     # Blueprint
     "analyze_blueprint_graph",
     "create_blueprint_variable",

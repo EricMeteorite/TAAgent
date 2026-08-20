@@ -51,6 +51,54 @@ def test_niagara_tools_export_bake_command() -> None:
     assert hasattr(module, "bake_niagara_system")
 
 
+def test_unreal_insights_tools_are_available() -> None:
+    module = importlib.import_module("mcps.unreal_render_mcp.tools.insights")
+    assert hasattr(module, "list_unreal_insights_traces")
+    assert hasattr(module, "get_unreal_insights_timing_summary")
+    assert hasattr(module, "export_unreal_insights_timing_events")
+
+
+def test_unreal_insights_csv_conversion(tmp_path) -> None:
+    module = importlib.import_module("mcps.unreal_render_mcp.tools.insights")
+    csv_path = tmp_path / "timers.csv"
+    csv_path.write_text(
+        "Name,Count,Incl,I.Max,Excl,Duration\nPostProcessMaterial,4,0.003,0.001,0.002,0.0005\n",
+        encoding="utf-8",
+    )
+
+    rows = module._read_csv_rows(csv_path)
+
+    assert rows[0]["Name"] == "PostProcessMaterial"
+    assert rows[0]["Count"] == 4
+    assert rows[0]["Incl_ms"] == 3.0
+    assert rows[0]["I.Max_ms"] == 1.0
+    assert rows[0]["Duration_ms"] == 0.5
+
+
+def test_unreal_insights_name_filter_supports_substrings_and_wildcards() -> None:
+    module = importlib.import_module("mcps.unreal_render_mcp.tools.insights")
+    name = "PostProcessMaterial 370x768 Material=M_PP_DepthLine"
+    assert module._matches_name(name, "DepthLine")
+    assert module._matches_name(name, "PostProcessMaterial*")
+    assert not module._matches_name(name, "Nanite*")
+
+
+def test_unreal_insights_event_summary_groups_threads() -> None:
+    module = importlib.import_module("mcps.unreal_render_mcp.tools.insights")
+    groups = module._summarize_timing_events(
+        [
+            {"ThreadName": "GPU0", "TimerId": 7, "TimerName": "Pass", "Duration": 0.001},
+            {"ThreadName": "GPU0", "TimerId": 7, "TimerName": "Pass", "Duration": 0.003},
+            {"ThreadName": "RenderThread", "TimerId": 7, "TimerName": "Pass", "Duration": 0.0005},
+        ]
+    )
+
+    assert groups[0]["thread_name"] == "GPU0"
+    assert groups[0]["count"] == 2
+    assert groups[0]["average_ms"] == 2.0
+    assert groups[0]["max_ms"] == 3.0
+
+
 def test_blueprint_tools_export_content_and_graph_analysis() -> None:
     module = importlib.import_module("mcps.unreal_render_mcp.tools.blueprint")
     assert hasattr(module, "read_blueprint_content")

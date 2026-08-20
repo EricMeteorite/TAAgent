@@ -70,6 +70,10 @@ from tools import (
     load_level,
     save_current_level,
     get_current_level,
+    # Unreal Insights
+    list_unreal_insights_traces,
+    get_unreal_insights_timing_summary,
+    export_unreal_insights_timing_events,
     # Blueprint
     analyze_blueprint_graph,
     create_blueprint_variable,
@@ -206,6 +210,15 @@ mcp.tool()(create_level)
 mcp.tool()(load_level)
 mcp.tool()(save_current_level)
 mcp.tool()(get_current_level)
+
+
+# ============================================================================
+# Register Unreal Insights Tools
+# ============================================================================
+
+mcp.tool()(list_unreal_insights_traces)
+mcp.tool()(get_unreal_insights_timing_summary)
+mcp.tool()(export_unreal_insights_timing_events)
 
 
 # ============================================================================
